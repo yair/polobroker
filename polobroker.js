@@ -2,31 +2,39 @@ const Poloniex = require('poloniex-api-node');
 const fs = require('fs');
 var Inotify = require('inotify').Inotify;
 var inotify = new Inotify();
+const poloTrader = require('./poloTrader');
 
-const LOG_STREAMS = false;
-const LOG_ACTIONS = true;
-const VOLATILE_DIR = '/home/yair/w/volatile/';
-const ORDERS_FN = 'orders.json';
-const PAPER_TRADE = true; // Set orders on top of existing ones and don't execute
+const c = { //TODO: move to config file
+    MINIMUM_TRADE: 0.0001,         // 10ksat @poloni
+    PRICE_RESOLUTION: 0.00000001,  // 1sat @poloni
+    LOG_STREAMS: false,
+    VOLATILE_DIR: '/home/yair/w/volatile/',
+    ORDERS_FN: 'orders.json',
+    PAPER_TRADE: true, // Set orders on top of existing ones and don't execute
+};
 
 var acts = { sells: {}, buys: {} };
 
 const basedir = '/home/yair/w/dm_raw/sr/' + `${Math.floor(new Date() / 1000)}/`;
-fs.mkdirSync(basedir);
-const actionsdir = `${basedir}actions/`;
-fs.mkdirSync(actionsdir);
-console.log(`Base folder created at ${basedir}`);
+if (c['LOG_STREAMS']) {
+    fs.mkdirSync(basedir);
+    const actionsdir = `${basedir}actions/`;
+    fs.mkdirSync(actionsdir);
+    console.log(`Base folder created at ${basedir}`);
+}
 let markets = {};
 var timer = null;
 
 let poloniex = new Poloniex();
 
-if (LOG_STREAMS) {
+poloTrader.init(c, poloniex);
+
+if (c['LOG_STREAMS']) {
     ticker_stream = fs.createWriteStream(basedir + 'ticker');
 }
 
 // subscribe to ticker and all ob channels, for later analysis
-poloniex.subscribe('ticker');
+poloniex.subscribe('ticker');                                           // TODO: move these to poloniex.on('open'), maybe they'll work. Why did they stop?!
 
 poloniex.returnTicker().then((ticker) => {
     for (market in Object.keys(ticker)) {
@@ -36,7 +44,7 @@ poloniex.returnTicker().then((ticker) => {
             continue;
         }
 
-        if (LOG_STREAMS) {
+        if (c['LOG_STREAMS']) {
             let fname = basedir + mname;
             markets[mname] = { 'stream': fs.createWriteStream(fname) };
         } else {
@@ -55,12 +63,12 @@ poloniex.on('message', (channelName, data, seq) => {
                 'seq': seq,
                 'payload': data};
     if (channelName === 'ticker') {
-        if (LOG_STREAMS) {
+        if (c['LOG_STREAMS']) {
             ticker_stream.write(`${JSON.stringify(line)}\n`);
         }
         updateFromTicker(data, seq);
     } else if (channelName in markets) {
-        if (LOG_STREAMS) {
+        if (c['LOG_STREAMS']) {
             markets[channelName]['stream'].write(`${JSON.stringify(line)}\n`);
         }
         updateFromStream(channelName, data, seq);
@@ -89,6 +97,7 @@ function updateFromStream (mname, payload, seq) {
         if (item_type == 'orderBook') {
             markets[mname]['ob_asks'] = data['asks'];   // copy the whole thing
             markets[mname]['ob_bids'] = data['bids'];   // copy the whole thing
+            console.log("Populated order book for " + mname);
         } else if (item_type == 'orderBookModify') {
             if (data['type'] == 'bid') {
                 markets[mname]['ob_bids'][data['rate']] = data['amount'];
@@ -104,10 +113,11 @@ function updateFromStream (mname, payload, seq) {
 			// Update price and volume stats, I guess
             // No! This is also for adjusting remaining amount to trade! TODO
             if (mname in Object.keys(lives)) {
-                if (data['rate'] in Object.keys(lives[mname]['orders'])) {
+                if (data['rate'] in Object.keys(lives[mname]['my_orders'])) {
                     lives[mname]['amount_changed'] = 1;
+                    // def need hit trades for paper trading, and maybe not only.
+                    lives[mname]['exch_trades'][seq] = data; // keep all trades?
                 }
-                lives[mname]['trades'].push(data);
             }
         } else {
             console.log(`Unfamiliar item type: ${item_type} payload: ${JSON.stringify(payload)}`);
@@ -126,6 +136,7 @@ function updateFromStream (mname, payload, seq) {
 //        console.log(`lives[${live}]: ${lives[live]}`);
         if (lives[live].hasOwnProperty(['trigger']) && lives[live]['trigger'] == 1) {
             console.log(`Triggering ${live} from stream update`);
+            lives[live]['trigger'] = 0;
             trigger(live);
         }
     }
@@ -141,13 +152,37 @@ function updateFromStream (mname, payload, seq) {
 //    }
 }
 
-function getSortedOB (ob) {
- 
-    return Object.keys(ob).sort().map(x => [x, ob[x]]);
-}
-
 function trigger (mname) {
-    console.log(`Triggered: ${mname}`);
+    console.log(`Triggered: ${mname}: ${Object.keys(acts['sells']).length} sells, ${Object.keys(acts['buys']).length} buys (${Object.keys(acts['buys'])})`);
+    if (Object.keys(acts['sells']).length != 0 && acts['sells'].hasOwnProperty(mname)) {
+
+        if (acts['sells'][mname]['done']) {
+            console.log(`Sell ${mname} action done. Deleting object.`);
+            delete acts['sells'][mname]; // Actually, should archive these for later analysis
+            return;
+        }
+        if (!acts['sells'][mname]['triggerRunning']) {
+            acts['sells'][mname]['triggerRunning'] = true;
+            poloTrader.triggerSell(mname, acts['sells'][mname], markets[mname]);
+            acts['sells'][mname]['triggerRunning'] = false;
+        }
+    } else if (Object.keys(acts['buys']).length != 0 && acts['buys'].hasOwnProperty(mname)) {
+    
+        if (acts['buys'][mname]['done']) {
+            console.log(`Buy ${mname} action done. Deleting object.`);
+            delete acts['buys'][mname];
+            return;
+        }
+        if (!acts['buys'][mname]['triggerRunning']) {
+            acts['buys'][mname]['triggerRunning'] = true;
+            console.log('markets[' + mname + ']["ob_bids"]=');
+            console.log(markets[mname]['ob_bids']);
+            poloTrader.triggerBuy(mname, acts['buys'][mname], markets[mname]);
+            acts['buys'][mname]['triggerRunning'] = false;
+        }
+    } else {
+        console.log(`Market ${mname} triggered but isn't alive`);
+    }
 }
 
 function triggerAll () {
@@ -165,8 +200,8 @@ function triggerAll () {
     } else {
         console.log("triggerAll called with nothing to do. Finalizing.");
         clearInterval(timer);
-		fs.unlink (VOLATILE_DIR + ORDERS_FN, function (err) { 
-			console.log(`${VOLATILE_DIR + ORDERS_FN} read and removed.`);
+		fs.unlink (c['VOLATILE_DIR'] + c['ORDERS_FN'], function (err) { 
+			console.log(`${c['VOLATILE_DIR'] + c['ORDERS_FN']} read and removed.`);
 		});
     }
 }
@@ -192,7 +227,7 @@ function processOrders () {
         console.log("ERROR: New batch arrived while older orders are still being processed. Aborting new batch!");
         return;
     }
-	let fn = VOLATILE_DIR + ORDERS_FN;
+	let fn = c['VOLATILE_DIR'] + c['ORDERS_FN'];
 	fs.readFile (fn, 'utf8', function (err, data) {
         if (err) {
             console.log(`Error reading file ${fn}: ${err}`);
@@ -209,11 +244,14 @@ function processOrders () {
 				start: Date.now(),
 				timeout: timeout,
 				prev_balance: action[2],
+				current_balance: action[2],
 				total_amount: action[3],
 				type: action[0],
-                orders: {},
+                my_orders: {},
                 amount_changed: 0,
                 trades: [],
+                triggerRunning: false,
+                done: false,
 			};
             console.log(`action: ${action}`);
             if (action[0] == 'Sell') {
@@ -236,11 +274,11 @@ poloniex.on('open', () => {
 		console.log(`Filename: ${filename}, eventType: ${eventType}`);
 	});*/
 	inotify.addWatch({
-		path:		VOLATILE_DIR,
+		path:		c['VOLATILE_DIR'],
 		watch_for:	Inotify.IN_CLOSE,
 		callback:	function (event) {
 			console.log(`${event.name} closed.`);
-			if (event.name == ORDERS_FN) {
+			if (event.name == c['ORDERS_FN']) {
 				processOrders();
 			}
 		}
