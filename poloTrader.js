@@ -146,6 +146,17 @@ console.log(`---> Comparing ticker['last']=${ticker['last']} to rate=${rate}`);
 function finalize_act (mname, act) {
 
     // TODO: kill all remaining orders
+    
+    // dump order history
+    if (polo) {
+        polo.returnTradeHistory(mname, act['start'], Date.now(), 1000, function (err, body) {
+            if (err) {
+                console.out("Error fetching trade history: " + err);
+            } else {
+                fs.writeFile(c['VOLATILE_DIR'] + "tradeHistory_" + mname + "_" + Date.now() + ".json", body);
+            }
+        });
+    }
     act['done'] = true;
 }
 
