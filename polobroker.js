@@ -14,18 +14,42 @@ const c = { //TODO: move to config file
     LOG_STREAMS: false,
     VOLATILE_DIR: '/home/yair/w/volatile/',
     ORDERS_FN: 'orders.json',
-    PAPER_TRADE: true, // Set orders on top of existing ones and don't execute
+    PAPER_TRADE: false, // Set orders on top of existing ones and don't execute
     BASEDIR: '/home/yair/w/dm_raw/sr/' + `${Math.floor(new Date() / 1000)}/`,
 };
 
 // Get secrets
+var secrets;
+var data = fs.readFileSync ('secrets.json', 'utf8'); /*, function (err, data) {
+    console.log("1");
+    if (err) {
+        console.log("Failed to read secrets file: " + err);
+        process.exit(1);
+    } else {*/
+        secrets = JSON.parse(data);
+        console.log(JSON.stringify(secrets));
+        console.log(`key: ${secrets['key']} and secret: ${secrets['secret']}`);
+/*    }
+    console.log("2");
+});*/
 
 // global vars
 var acts = { sells: {}, buys: {} };
 var markets = {};
 var timer = null;
-var poloniex = new Poloniex();
+//var poloniex = new Poloniex(secrets['key'], secrets['secret'], { nonce: () => new Date().time() * 2 });
+var poloniex = new Poloniex(secrets['key'], secrets['secret'], { nonce: () => Date.now() * 2000 });
 var full_market_list = {};
+
+// test polo login
+poloniex.returnBalances(function (err, balances) {
+      if (err) {
+          console.log("Failed to login to polo: " + err);
+          process.exit(1);
+      } else {
+          console.log("Successfully logged in: " + JSON.stringify(balances));
+      }
+});
 
 // Init exchange recorder
 if (c['LOG_STREAMS']) {
@@ -340,6 +364,9 @@ function processOrders () {
                 triggerRunning: false,
                 done: false,
                 exch_trades: {},
+                fetching_balances: false,
+                pending_add: {},
+                pending_remove: {},
 			};
             console.log(`action: ${JSON.stringify(action)}`);
             if (!(act['mname'] in full_market_list)) {
@@ -362,6 +389,7 @@ function processOrders () {
 //		launchAllSells();
         triggerAll();
         timer = setInterval (triggerAll, 1000);
+        console.log("Setting timer no. " + timer);
 	});
 }
 

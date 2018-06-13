@@ -59,7 +59,9 @@ console.log(`---> Comparing ticker['last']=${ticker['last']} to rate=${rate}`);
                 act['exch_trades'] = {};
             } else {    // This takes a long time, but we don't know if the executed trade was due to our order
                 continued = true;
+                act['fetching_balances'] = true;
                 poloniex.returnBalances(function (err, balances) { // Consider diffing returnOpenOrders or returnMyTradeHistory for more exact info
+                    act['fetching_balances'] = false;
                     if (err) {
                         console.log("Failed to get balances: " + err.message);
                     } else {
@@ -126,7 +128,9 @@ console.log(`---> Comparing ticker['last']=${ticker['last']} to rate=${rate}`);
                 act['exch_trades'] = {};
             } else {    // This takes a long time, but we don't know if the executed trade was due to our order
                 continued = true;
+                act['fetching_balances'] = true;
                 poloniex.returnBalances(function (err, balances) {
+                    act['fetching_balances'] = false;
                     if (err) {
                         console.log("Failed to get balances: " + err.message);
                     } else {
@@ -167,25 +171,25 @@ function done_or_sell (mname, act, market) {
         process.exit(1);
     }
      
-    remaining_amount = - act['prev_balance'] + act['total_amount'] + act['current_balance']; // idea - make total_amount negative for sells. Will this allow to consolidate this?
-
-    console.log("remaining_amount = " + remaining_amount);
+    console.log("remaining_amount to sell = " + remaining_amount(act));
 
 //    if (act['prev_balance'] - act['total_amount'] <= act['current_balance'] + c['MINIMUM_TRADE']) {
-    if (remaining_amount < c['MINIMUM_TRADE']) {
+    if (remaining_amount(act) < c['MINIMUM_TRADE']) {
 
         console.log(`Current balance is ${act['current_balance']}. We wanted ${act['prev_balance'] - act['total_amount']}, so that's enough.`);
         return finalize_act(mname, act);;
     }
 
-    new_orders = orderConfabulator.calc_new_orders(mname, act, market, remaining_amount);
+    update_orders(mname, act, market);
+/*
+    new_orders = orderConfabulator.calc_new_orders(mname, act, market, remaining_amount(act));
 //    console.log("Orig orders = " + JSON.stringify(act['my_orders']));
 //    console.log("new orders = " + JSON.stringify(new_orders));
 
     diff = order_diff (act['my_orders'], new_orders);
     console.log("Order diff = " + JSON.stringify(diff));
 
-    replace_orders(act['my_orders'], diff);
+    replace_orders(act['my_orders'], diff);*/
 }
 
 function done_or_buy (mname, act, market) {
@@ -196,17 +200,34 @@ function done_or_buy (mname, act, market) {
         return finalize_act(mname, act);;
     }
 
-    remaining_amount = act['prev_balance'] + act['total_amount'] - act['current_balance'];
-    console.log("remaining_amount = " + remaining_amount);
+    console.log("remaining_amount to buy = " + remaining_amount(act));
 
-    new_orders = orderConfabulator.calc_new_orders(mname, act, market, remaining_amount);
+    update_orders(mname, act, market);
+}
+
+function update_orders (mname, act, market) {
+
+    new_orders = orderConfabulator.calc_new_orders(mname, act, market, remaining_amount(act));
 //    console.log("Orig orders = " + JSON.stringify(act['my_orders']));
 //    console.log("new orders = " + JSON.stringify(new_orders));
 
     diff = order_diff (act['my_orders'], new_orders);
     console.log("Order diff = " + JSON.stringify(diff));
 
-    replace_orders(act['my_orders'], diff);
+//    replace_orders(act['my_orders'], diff);
+    replace_orders(act, diff);
+}
+
+function remaining_amount (act) {
+
+    if (act['type'] == 'Buy') {
+        return act['prev_balance'] + act['total_amount'] - act['current_balance'];
+    } else if (act['type'] == 'Sell') {
+        return - act['prev_balance'] + act['total_amount'] + act['current_balance'];
+    } else {
+        console.log("Invalid act type: " + act['type']);
+        process.exit(1);
+    }
 }
 
 function order_diff (old_orders, new_orders) {
@@ -262,7 +283,10 @@ function remove_order(order, callback) {
 
 function add_order(order, callback) {
 //        add order to hash of orders !!! after you have and id for it !!!
-    if (!c[PAPER_TRADE]) {
+
+//    console.log("\n\nadd_order: Adding order: " + order);
+
+    if (!c['PAPER_TRADE']) {
         if (order['type'] == 'Buy') {
             console.log("Issuing buy order: " + JSON.stringify(order));
             polo.buy(order['mname'], order['rate'], order['amount'], false, false, false, callback);
@@ -273,8 +297,15 @@ function add_order(order, callback) {
     }
 }
 
-function set_new_orders(my_orders, adds) {
+//function set_new_orders(my_orders, adds) {
+function set_new_orders(act, adds) {
 
+    if (Object.keys(adds).length == 0) {
+        console.log("set_new_orders() called with no adds: " + JSON.stringify(adds));
+        return;
+    }
+
+    console.log("In set_new_orders(). Have " + Object.keys(adds).length + " orders to add.");
     for (var order in adds) {
 
 //        if  order exists, WAT...
@@ -282,24 +313,38 @@ function set_new_orders(my_orders, adds) {
 //        else
 //            set up the order, and put the id in the book.
 
-        add_order(order, function (err, body) {
+        add_order(adds[order], function (err, body) {
+
+            console.log("Order no. " + order + " out of " + Object.keys(adds).length + err ? " failed." : " added.");
 
             if (err) {
-                console.log("Failed to add order: " + err);
+                console.log("\n\nFailed to add order: " + err);
+                console.log("Body received: " + JSON.stringify(body));
+                console.log("Order was: " + JSON.stringify(body));       // When this fails with 'Not enough BTC.', how do I re-add it with a lower amount? Can I access my act?
+                if (toString(err).match('Not enough')) {
+                    act['amount'] = 0.9 * parseFloat(act['amount']); // Like this? Do we need to tell anyone that an order wasn't executed?
+                }
+//                process.exit(0);
             } else {
-                console.log(`limit order response is ${body}. Add id to order!`);
-                my_orders[body['rate']] = body; // or something. Do we get and amount as well? What about market? And move the id to first level plox
+                console.log(`\n\nlimit order response is ${JSON.stringify(body)}. ID is ${body['orderNumber']}`);
+                order['id'] = body['orderNumber'];
+                act['my_orders'][body['rate']] = body; // or something. Do we get and amount as well? What about market? And move the id to first level plox
+                // This might take longer than for the next trigger to arrive. We need to store the order in a 'pending' hash for the interval between
+                // issuing the order and receiving its ID so it can be removed.
             }
         });
     }
 }
 
-function replace_orders (my_orders, diff) {
+//function replace_orders (my_orders, diff) {
+function replace_orders (act, diff) {
 
     var orders = 0;
 
-    if (diff['remove'].length == 0)
-        return set_new_orders(diff['add']);
+    if (Object.keys(diff['remove']).length == 0) {
+        console.log("No orders to remove, going straight to add " + Object.keys(diff['add']).length + " new ones.");
+        return set_new_orders(act, diff['add']);
+    }
 
     for (var order in diff['remove']) {
 
@@ -308,8 +353,10 @@ function replace_orders (my_orders, diff) {
 			if (err) {
 				console.log(`Failed to remove order no. ${order['id']}: ${err}`);
 			}
-			if (++orders == diff['remove'].length) {
-				set_new_orders(my_orders, diff['add']);
+            console.log("Removed order " + orders + "/" + Object.keys(diff['remove']).length);
+			if (++orders == Object.keys(diff['remove']).length) {
+                console.log("Removed all orders needing removal. Calling set_new_orders()");
+				set_new_orders(act, diff['add']);
 			}
 		});
 	}

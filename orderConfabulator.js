@@ -32,21 +32,22 @@ module.exports = {
             }
         }
 
-//        dumpOB(market['ob_bids']);
+        dumpOB(market['ob_bids']);
 
         stupidReturnValue = {};
         
         if (act['type'] == 'Buy') {
-            price = getSortedOB(market['ob_bids']).reverse()[0][0] + (c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
-            console.log("New order price: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
+            price = parseFloat(getSortedOB(market['ob_bids']).reverse()[0][0]) +
+                    parseFloat(c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
+            console.log("New order buy: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
 
             stupidReturnValue[price] = {    'mname': mname,
                                             'rate': price,
                                             'type': 'Buy',
                                             'amount': remaining_amount, };
         } else if (act['type'] == 'Sell') {
-            price = getSortedOB(market['ob_asks'])[0][0] - (c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
-            console.log("New order price: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
+            price = parseFloat(getSortedOB(market['ob_asks'])[0][0]) - parseFloat(c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
+            console.log("New order sell: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
 
             stupidReturnValue[price] = {    'mname': mname,
                                             'rate': price,
