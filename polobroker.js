@@ -163,7 +163,7 @@ function updateFromTicker (data, seq) {
 //    if (mname in Object.keys(lives)) {
     if (lives.hasOwnProperty(mname)) {
         console.log(`Got ticker for live market ${mname}! data['last']=${data['last']}`);
-        if (c['PAPER_TRADE'] || data['last'] in Object.keys(lives[mname]['my_orders'])) {   // Is this correct? Also for paper trading? Let's ease it for paper.
+        if (c['PAPER_TRADE'] || data['last'] in Object.keys(lives[mname]['active_orders'])) {   // Is this correct? Also for paper trading? Let's ease it for paper. TODO: pending too
             lives[mname]['amount_changed'] = 1;
             // def need hit trades for paper trading, and maybe not only.
             lives[mname]['exch_trades'][seq] = { 'ticker': data, }; // keep all trades? <--- key is seq!
@@ -206,7 +206,7 @@ function updateFromStream (mname, payload, seq) {
 //            if (mname in Object.keys(lives)) {
             if (lives.hasOwnProperty(mname)) {
                 console.log(`Someone's order was hit! data['rate']=${data['rate']}`);
-                if (c['PAPER_TRADE'] || data['rate'] in Object.keys(lives[mname]['my_orders'])) {   // Is this correct? Also for paper trading? Let's ease it for paper.
+                if (c['PAPER_TRADE'] || data['rate'] in Object.keys(lives[mname]['active_orders'])) {   // Is this correct? Also for paper trading? Let's ease it for paper. TODO: pending too
                     lives[mname]['amount_changed'] = 1;
                     // def need hit trades for paper trading, and maybe not only.
                     lives[mname]['exch_trades'][seq] = { 'newTrade': data, }; // keep all trades? <--- key is seq!
@@ -299,7 +299,7 @@ function triggerAll () {
             trigger(Object.keys(acts['buys'])[act]);
         }
     } else {
-        console.log("triggerAll called with nothing to do. Finalizing. timer=" + timer); // TODO: kill timer if not dead, or see why it's not dead.
+        console.log("triggerAll called with nothing to do. Finalizing. timer=" + JSON.stringify(timer)); // TODO: kill timer if not dead, or see why it's not dead.
         clearInterval(timer);
         if (fs.existsSync(c['VOLATILE_DIR'] + c['ORDERS_FN'])) {
             fs.copyFileSync(c['VOLATILE_DIR'] + c['ORDERS_FN'],
@@ -358,15 +358,16 @@ function processOrders () {
 				current_balance: action['previous_balance'],
 				total_amount: action['amount'],
 				type: action['type'],
-                my_orders: {},
                 amount_changed: 0,
                 trades: [],
                 triggerRunning: false,
                 done: false,
                 exch_trades: {},
                 fetching_balances: false,
+                active_orders: {},
                 pending_add: {},
                 pending_remove: {},
+                order_archive: [],
 			};
             console.log(`action: ${JSON.stringify(action)}`);
             if (!(act['mname'] in full_market_list)) {
@@ -389,7 +390,7 @@ function processOrders () {
 //		launchAllSells();
         triggerAll();
         timer = setInterval (triggerAll, 1000);
-        console.log("Setting timer no. " + timer);
+        console.log("Setting timer no. " + CircularJSON.stringify(timer));
 	});
 }
 

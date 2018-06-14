@@ -1,5 +1,6 @@
 const poloTrader = require('./poloTrader');
 const orderConfabulator = require('./orderConfabulator');
+const fs = require('fs');
 
 var polo = null;
 var c = null;
@@ -26,8 +27,8 @@ console.log(`i=${i} seq=${seq}`);
 console.log(`exch_trades = ${JSON.stringify(act['exch_trades'])}`);
                     if (Object.keys(act['exch_trades'][seq])[0] == 'newTrade') {
                         trade = act['exch_trades'][seq]['newTrade'];
-                        for (order in act['my_orders']) {
-                            rate = act['my_orders'][order]['rate'];
+                        for (order in act['active_orders']) {
+                            rate = act['active_orders'][order]['rate'];
 console.log(`---> Comparing trade['rate']=${trade['rate']} to rate=${rate}`);
                             if (trade['rate'] >= rate) {
                                 new_balance = Math.max (act['current_balance'] - act['total_amount'],
@@ -40,8 +41,8 @@ console.log(`---> Comparing trade['rate']=${trade['rate']} to rate=${rate}`);
                         }
                     } else if (Object.keys(act['exch_trades'][seq])[0] == 'ticker') {
                         ticker = act['exch_trades'][seq]['ticker'];
-                        for (order in act['my_orders']) {
-                            rate = act['my_orders'][order]['rate'];
+                        for (order in act['active_orders']) {
+                            rate = act['active_orders'][order]['rate'];
 console.log(`---> Comparing ticker['last']=${ticker['last']} to rate=${rate}`);
                             if (ticker['last'] >= rate) { // Gah, no amount data in ticker
                                 new_balance = act['current_balance'] - act['total_amount'];
@@ -89,8 +90,8 @@ console.log(`---> Comparing ticker['last']=${ticker['last']} to rate=${rate}`);
                     seq = Object.keys(act['exch_trades'])[i];
                     if (Object.keys(act['exch_trades'][seq])[0] == 'newTrade') {
                         trade = act['exch_trades'][seq]['newTrade'];
-                        for (order in act['my_orders']) {
-                            rate = act['my_orders'][order]['rate'];
+                        for (order in act['active_orders']) {
+                            rate = act['active_orders'][order]['rate'];
 console.log(`---> Comparing trade['rate']=${trade['rate']} to rate=${rate}`);
                             if (trade['rate'] <= rate) {
                                 new_balance = Math.min (parseFloat(act['current_balance']) + parseFloat(act['total_amount']),
@@ -109,8 +110,8 @@ console.log(`act['current_balance']=${act['current_balance']} act['total_amount'
                         }
                     } else if (Object.keys(act['exch_trades'][seq])[0] == 'ticker') {
                         ticker = act['exch_trades'][seq]['ticker'];
-                        for (order in act['my_orders']) {
-                            rate = act['my_orders'][order]['rate'];
+                        for (order in act['active_orders']) {
+                            rate = act['active_orders'][order]['rate'];
 console.log(`---> Comparing ticker['last']=${ticker['last']} to rate=${rate}`);
                             if (ticker['last'] <= rate) { // Gah, no amount data in ticker
                                 new_balance = act['current_balance'] + act['total_amount'];
@@ -207,11 +208,16 @@ function done_or_buy (mname, act, market) {
 
 function update_orders (mname, act, market) {
 
+    if (Object.keys(act['pending_add']).length != 0 || Object.keys(act['pending_remove']).length != 0) { // Can/should this be more fine grained?
+        console.log("We have pending orders, so will skip update this time.");
+        return;
+    }
+
     new_orders = orderConfabulator.calc_new_orders(mname, act, market, remaining_amount(act));
 //    console.log("Orig orders = " + JSON.stringify(act['my_orders']));
 //    console.log("new orders = " + JSON.stringify(new_orders));
 
-    diff = order_diff (act['my_orders'], new_orders);
+    diff = order_diff (act['active_orders'], new_orders);
     console.log("Order diff = " + JSON.stringify(diff));
 
 //    replace_orders(act['my_orders'], diff);
@@ -230,9 +236,9 @@ function remaining_amount (act) {
     }
 }
 
-function order_diff (old_orders, new_orders) {
+function order_diff (orders, new_orders) {
 
-//    old_orders = JSON.parse (JSON.stringify (orders));
+    old_orders = JSON.parse (JSON.stringify (orders)); // This function cannot make changes to the live set, that requires exch callback
     diff = { remove: {}, add: {} };
 
     for (old_order in old_orders) {
@@ -274,6 +280,10 @@ function order_diff (old_orders, new_orders) {
 
 function remove_order(order, callback) {
 
+    if (!order.hasOwnProperty('id')) {
+        console.log("Cannot cancel unidentified order: " + JSON.stringify(order));
+        process.exit(1);
+    }
     if (!c['PAPER_TRADE']) {
         console.log("Cancelling order: " + JSON.stringify(order));
         polo.cancelOrder(order['id'], callback)
@@ -313,22 +323,33 @@ function set_new_orders(act, adds) {
 //        else
 //            set up the order, and put the id in the book.
 
+        act['pending_add'][order['rate']] = order;
+
         add_order(adds[order], function (err, body) {
 
+            delete act['pending_add'][order['rate']];
             console.log("Order no. " + order + " out of " + Object.keys(adds).length + err ? " failed." : " added.");
 
             if (err) {
-                console.log("\n\nFailed to add order: " + err);
-                console.log("Body received: " + JSON.stringify(body));
+                console.log("\nFailed to add order: " + err);
+//                console.log("toString(err) = " + toString(err));
+//                console.log("stringify(err) = " + JSON.stringify(err));
+//                console.log("err type is " + Object.prototype.toString.call(err));
+//                console.log("Body received: " + JSON.stringify(body));
                 console.log("Order was: " + JSON.stringify(body));       // When this fails with 'Not enough BTC.', how do I re-add it with a lower amount? Can I access my act?
-                if (toString(err).match('Not enough')) {
-                    act['amount'] = 0.9 * parseFloat(act['amount']); // Like this? Do we need to tell anyone that an order wasn't executed?
+//                if (toString(err).match('Not enough')) {
+                if (body['error'].match('Not enough')) { // TODO: If this happens every time, start with a reduced amount.
+                    console.log("Reducing total act amount from " + act['total_amount'] + " to " + (act['total_amount'] * 0.998));
+                    act['total_amount'] = 0.998 * parseFloat(act['total_amount']); // Like this? Do we need to tell anyone that an order wasn't executed?
+                } else { 
+                    console.log("Unhandled error. WAT DO");
+                    process.exit(0);
                 }
 //                process.exit(0);
             } else {
                 console.log(`\n\nlimit order response is ${JSON.stringify(body)}. ID is ${body['orderNumber']}`);
                 order['id'] = body['orderNumber'];
-                act['my_orders'][body['rate']] = body; // or something. Do we get and amount as well? What about market? And move the id to first level plox
+                act['active_orders'][body['rate']] = body; // or something. Do we get and amount as well? What about market? And move the id to first level plox
                 // This might take longer than for the next trigger to arrive. We need to store the order in a 'pending' hash for the interval between
                 // issuing the order and receiving its ID so it can be removed.
             }
@@ -339,22 +360,29 @@ function set_new_orders(act, adds) {
 //function replace_orders (my_orders, diff) {
 function replace_orders (act, diff) {
 
-    var orders = 0;
+//    var orders = 0;
 
-    if (Object.keys(diff['remove']).length == 0) {
+    if (Object.keys(diff['remove']).length == 0) { //TODO: also, if there are pending removals
         console.log("No orders to remove, going straight to add " + Object.keys(diff['add']).length + " new ones.");
         return set_new_orders(act, diff['add']);
     }
 
     for (var order in diff['remove']) {
 
+        act['pending_remove'][order['rate']] = order;
+        delete act['active_orders'][order['rate']];
+
 		remove_order(order, function (err) {
 
 			if (err) {
 				console.log(`Failed to remove order no. ${order['id']}: ${err}`);
 			}
-            console.log("Removed order " + orders + "/" + Object.keys(diff['remove']).length);
-			if (++orders == Object.keys(diff['remove']).length) {
+            act['order_archive'].append(order);
+            delete act['pending_remove'][order['rate']];
+//            console.log("Removed order " + orders + "/" + Object.keys(diff['remove']).length);
+            console.log("Removed " + act['mname'] + " order at " + order['rate'] + '. ' + Object.keys(act['pending_remove']).length + " orders left to remove.");
+//			if (++orders == Object.keys(diff['remove']).length) {       // TODO: Do this through act{} members
+			if (Object.keys(act['pending_remove']).length == 0) {
                 console.log("Removed all orders needing removal. Calling set_new_orders()");
 				set_new_orders(act, diff['add']);
 			}
