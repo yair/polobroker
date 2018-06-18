@@ -5,12 +5,15 @@ var Inotify = require('inotify').Inotify;
 var inotify = new Inotify();
 const poloTrader = require('./poloTrader');
 const moment = require('moment');
+const utils = require('./utils');
 
 // config (i.e. global consts)
 
 const c = { //TODO: move to config file
     MINIMUM_TRADE: 0.0001,         // 10ksat @poloni
+    MINIMUM_BTC_TRADE: 0.000001,   // 100sat @poloni
     PRICE_RESOLUTION: 0.00000001,  // 1sat @poloni
+    PENDING_TIMEOUT: 15000,        // ms
     LOG_STREAMS: false,
     VOLATILE_DIR: '/home/yair/w/volatile/',
     ORDERS_FN: 'orders.json',
@@ -34,7 +37,7 @@ var data = fs.readFileSync ('secrets.json', 'utf8'); /*, function (err, data) {
 });*/
 
 // global vars
-var acts = { sells: {}, buys: {} };
+var acts = { sells: {}, buys: {}, archive: {} };
 var markets = {};
 var timer = null;
 //var poloniex = new Poloniex(secrets['key'], secrets['secret'], { nonce: () => new Date().time() * 2 });
@@ -78,7 +81,7 @@ if (c['LOG_STREAMS']) {
 function subscribeToAllCoins () {
 poloniex.returnTicker().then( async (ticker) => {
     console.log(`Got ${Object.keys(ticker).length} markets to subscribe to.`);
-    coin_list = ['USDT_BTC', 'BTC_ETH', 'BTC_XRP', 'BTC_XMR', 'BTC_LTC', 'BTC_ETH', 'BTC_STR'];
+//    coin_list = ['USDT_BTC', 'BTC_ETH', 'BTC_XRP', 'BTC_XMR', 'BTC_LTC', 'BTC_ETH', 'BTC_STR'];
 
     for (market in Object.keys(ticker)) {
         let mname = Object.keys(ticker)[market];
@@ -158,12 +161,13 @@ function updateFromTicker (data, seq) {
         seq = "blah" + Math.random();
     }
 
-//    console.log('updateFromTicker: seq = ' + seq);
+ //    console.log('updateFromTicker: seq = ' + seq + ' mname = ' + mname);
 
 //    if (mname in Object.keys(lives)) {
     if (lives.hasOwnProperty(mname)) {
-        console.log(`Got ticker for live market ${mname}! data['last']=${data['last']}`);
-        if (c['PAPER_TRADE'] || data['last'] in Object.keys(lives[mname]['active_orders'])) {   // Is this correct? Also for paper trading? Let's ease it for paper. TODO: pending too
+        console.log(`\nGot ticker for live market ${mname}! data['last']=${data['last']}`);
+        if (c['PAPER_TRADE'] || was_our_order_hit (lives[mname], data['last']) || lives[mname]['market_order']) {
+//        if (c['PAPER_TRADE'] || data['last'] in Object.keys(lives[mname]['active_orders'])) {   // Is this correct? Also for paper trading? Let's ease it for paper. TODO: pending too
             lives[mname]['amount_changed'] = 1;
             // def need hit trades for paper trading, and maybe not only.
             lives[mname]['exch_trades'][seq] = { 'ticker': data, }; // keep all trades? <--- key is seq!
@@ -174,6 +178,33 @@ function updateFromTicker (data, seq) {
     }
 //    console.log("Got ticker: " + JSON.stringify(data));
 //    We will want price and volume stats from here, eventually, but also maybe updating live balances. How is this different from 'newTrade' event?
+}
+
+function was_our_order_hit (act, price) {
+
+    order_prices = Object.keys(act['active_orders']).concat(Object.keys(act['pending_add']), Object.keys(act['pending_remove']));
+
+    for (order_id in order_prices) {
+
+        order_price = order_prices[order_id];
+
+        if (act['market_order']) {
+
+            console.log("\nJust issued a market order. Must have been our order that was hit.");
+            return true;
+        }
+
+        console.log("Comparing prices: " + price + " vs. " + order_price);
+
+        if (utils.are_close (order_price, price, c['PRICE_RESOLUTION'])) {
+
+            console.log("\nOur order might have hit! better go fetch balances and check.");
+            return true;
+        }
+    }
+
+    console.log("Nah, I guess our order wasn't hit.");
+    return false;
 }
 
 function updateFromStream (mname, payload, seq) {
@@ -206,7 +237,8 @@ function updateFromStream (mname, payload, seq) {
 //            if (mname in Object.keys(lives)) {
             if (lives.hasOwnProperty(mname)) {
                 console.log(`Someone's order was hit! data['rate']=${data['rate']}`);
-                if (c['PAPER_TRADE'] || data['rate'] in Object.keys(lives[mname]['active_orders'])) {   // Is this correct? Also for paper trading? Let's ease it for paper. TODO: pending too
+//                if (c['PAPER_TRADE'] || data['rate'] in Object.keys(lives[mname]['active_orders'])) {   // Is this correct? Also for paper trading? Let's ease it for paper. TODO: pending too
+                if (c['PAPER_TRADE'] || was_our_order_hit (lives[mname], data['rate']) || lives[mname]['market_order']) {
                     lives[mname]['amount_changed'] = 1;
                     // def need hit trades for paper trading, and maybe not only.
                     lives[mname]['exch_trades'][seq] = { 'newTrade': data, }; // keep all trades? <--- key is seq!
@@ -248,13 +280,69 @@ function updateFromStream (mname, payload, seq) {
 //    }
 }
 
+function finalize (act) {
+
+    acts['archive'][act['mname']] = act;
+    delete acts[act['type'] == 'Buy' ? 'buys' : 'sells'][act['mname']];
+
+    console.log(act['type'] + " " + act['coin_name'] + " archived. Now fetching and cancelling open orders.");
+
+    act['post_session_kills'] = {};
+
+    poloniex.returnOpenOrders(act['mname'], function (err, body) {
+
+        if (err) {
+            console.log("Giving up on fetching " + act['coin_name'] + " orders after getting error: " + err);
+        } else {
+            kills_left = Object.keys(body).length; // !=0 means a problems. These shouldn't exist.
+            console.log("\nGot " + kills_left + " orders to cancel for " + act['mname']);
+            for (osn in body) {
+                order = body[osn];
+                console.log("Cancelling order " + order['orderNumber'] + " in market " + act['mname']);
+                act['post_session_kills'][order['rate']] = order;
+
+                poloniex.cancelOrder(order['orderNumber'], function (err2, body2) {
+
+                    if (err) {
+                        console.log("Giving up on cancelling order " + order['orderNumber'] + " in market " + act['mname'] + " after getting error: " + err2);
+//                        act['post_session_kills'][order['rate']]['killed'] = false;
+                    } else {
+                        console.log("Successfully cancelled order " + order['orderNumber'] + " in market " + act['mname'] + ": " + body2);
+//                        act['post_session_kills'][order['rate']]['killed'] = true;
+                    }
+
+                    if (--kills_left == 0) {
+                        archive_act(act);
+                    }
+                });
+            }
+
+            if (kills_left == 0) {
+                console.log("No stray orders on finalizing " + act['mname'] + ". Good!");
+                archive_act(act);
+            }
+        }
+    });
+}
+
+function archive_act (act) {
+
+    fs.writeFile(c['VOLATILE_DIR'] + "act_archive_" + act['mname'] + "_" + Date.now() + ".json", JSON.stringify(act));
+}
+
 function trigger (mname) {
-    console.log(`Triggered: ${mname}: ${Object.keys(acts['sells']).length} sells, ${Object.keys(acts['buys']).length} buys (${Object.keys(acts['buys'])})`);
+    console.log(`Triggered: ${mname}: ${Object.keys(acts['sells']).length} sells (${Object.keys(acts['sells'])}), ${Object.keys(acts['buys']).length} buys (${Object.keys(acts['buys'])})`);
+    if (mname == undefined) {
+        console.log("Triggered on undefined market! Stack:");
+        console.trace();
+        return;
+    }
     if (Object.keys(acts['sells']).length != 0 && acts['sells'].hasOwnProperty(mname)) {
 
         if (acts['sells'][mname]['done']) {
-            console.log(`Sell ${mname} action done. Deleting object.`);
-            delete acts['sells'][mname]; // Actually, should archive these for later analysis
+            console.log(`Sell ${mname} action done. Moving object to archive and nuking its open orders.`);
+//            delete acts['sells'][mname]; // Actually, should archive these for later analysis
+            finalize(acts['sells'][mname]);
             if (Object.keys(acts['sells']).length == 0) {
                 for (act in acts['buys']) {
                     acts['buys'][act]['start'] = Date.now();
@@ -270,8 +358,9 @@ function trigger (mname) {
     } else if (Object.keys(acts['buys']).length != 0 && acts['buys'].hasOwnProperty(mname)) {
     
         if (acts['buys'][mname]['done']) {
-            console.log(`Buy ${mname} action done. Deleting object.`);
-            delete acts['buys'][mname];
+            console.log(`Buy ${mname} action done. Moving object to archive and nuking its open orders.`);
+            finalize(acts['buys'][mname]);
+//            delete acts['buys'][mname];
             return;
         }
         if (!acts['buys'][mname]['triggerRunning']) {
@@ -289,21 +378,31 @@ function trigger (mname) {
 function triggerAll () {
 
     if (Object.keys(acts['sells']).length != 0) {
+        console.log("acts['sells'] = " + JSON.stringify(acts['sells']));
         for (act in Object.keys(acts['sells'])) {
 //            trigger(acts['sells'][Object.keys(acts['sells'])[act]]);
-            trigger(Object.keys(acts['sells'])[act]);
+            let mname = Object.keys(acts['sells'])[act];
+            if (mname == undefined) continue; // This happens when the previous act has been deleted. TODO: rewrite
+            console.log("triggerAll triggering a sell for " + mname);
+//            trigger(Object.keys(acts['sells'])[act]);
+            trigger(mname);
         }
     } else if (Object.keys(acts['buys']).length != 0) { // Don't start buying until sells are done.
+        console.log("acts['buys'] = " + JSON.stringify(acts['buys']));
         for (act in Object.keys(acts['buys'])) {
 //            trigger(acts['buys'][Object.keys(acts['buys'])[act]]);
-            trigger(Object.keys(acts['buys'])[act]);
+            let mname = Object.keys(acts['buys'])[act];
+            if (mname == undefined) continue;
+            console.log("triggerAll triggering a buy for " + mname);
+            trigger(mname);
+//            trigger(Object.keys(acts['buys'])[act]);                    //TODO: Why does this trigger undefined markets?
         }
     } else {
-        console.log("triggerAll called with nothing to do. Finalizing. timer=" + JSON.stringify(timer)); // TODO: kill timer if not dead, or see why it's not dead.
+        console.log("triggerAll called with nothing to do. Finalizing session. timer=" + CircularJSON.stringify(timer)); // TODO: kill timer if not dead, or see why it's not dead.
         clearInterval(timer);
         if (fs.existsSync(c['VOLATILE_DIR'] + c['ORDERS_FN'])) {
             fs.copyFileSync(c['VOLATILE_DIR'] + c['ORDERS_FN'],
-                            c['VOLATILE_DIR'] + c['ORDERS_FN'] + ".bak-" + moment(now).utc().format("YYYYMMDDHHmmss"));
+                            c['VOLATILE_DIR'] + c['ORDERS_FN'] + ".bak-" + moment(Date.now()).utc().format("YYYYMMDDHHmmss"));
     		fs.unlink (c['VOLATILE_DIR'] + c['ORDERS_FN'], function (err) { 
                 if (err) {
     			    console.log(`${c['VOLATILE_DIR'] + c['ORDERS_FN']} failed to be removed: ` + err);
@@ -330,6 +429,12 @@ function launchAllSells() {
 
 }*/
 
+// {"amount": 0.0035932955158229475, "price": 0.00015453562082257122, "previous_balance": 0.00140241, "mname": "USDT_BTC", "type": "Sell"}
+function invert_action (action) {
+    action['type'] = action['type'] == 'Buy' ? 'Sell' : 'Buy';
+    action['price'] = 1. / action['price'];
+}
+
 //  {"timeout": 60, "actions": [{"type": "Sell", "mname": "USDT_BTC", "previous_balance": 0.0, "amount": 62534.996173497115, "price": 0.00013088973355479538}, {"type": "Buy", "mname": "BTC_ETH", "previous_balance": 0.0, "amount": 0.013593996348746794, "price": 0.07880499958992004}, {"type": "Buy", "mname": "BTC_BCH", "previous_balance": 1e-08, "amount": 12.224722972993568, "price": 8.758000330999494e-05}, {"type": "Buy", "mname": "BTC_LTC", "previous_balance": 0.0, "amount": 0.05016217873748306, "price": 0.021290000528097153}, {"type": "Buy", "mname": "BTC_STR", "previous_balance": 0.0, "amount": 0.0682594569234755, "price": 0.015684999525547028}]}
 function processOrders () {
     if (Object.keys(acts['buys']) != 0 || Object.keys(acts['sells']) != 0) {
@@ -350,9 +455,15 @@ function processOrders () {
 //		let buys = [];
 		for (i in actions) {
             action = actions[i];
+            if (action['mname'] == 'USDT_BTC') {
+                invert_action(action);
+            } else if (action['amount'] * action['price'] < c['MINIMUM_TRADE']) {
+                continue;
+            }
 			let act = {
                 mname: action['mname'],
 				start: Date.now(),
+                price: action['price'],
 				timeout: timeout,
 				prev_balance: action['previous_balance'],
 				current_balance: action['previous_balance'],
@@ -367,7 +478,11 @@ function processOrders () {
                 active_orders: {},
                 pending_add: {},
                 pending_remove: {},
+                pending_timestamp: 0,
                 order_archive: [],
+                market_order: false,
+                coin_name: coin_name_from_market (action['mname']),
+                btc_balance: Number.POSITIVE_INFINITY,
 			};
             console.log(`action: ${JSON.stringify(action)}`);
             if (!(act['mname'] in full_market_list)) {
@@ -375,8 +490,10 @@ function processOrders () {
                 process.exit(1);
             }
             if (act['type'] == 'Sell' && (act['prev_balance'] + c['PRICE_RESOLUTION'] - act['total_amount'] < 0.)) {
-                console.log(`Trying to sell more than we have. Aborting.`);
-                process.exit(1);
+//                if (act['mname'] != 'USDT_BTC') {
+                    console.log(`Trying to sell more than we have. Aborting.`);
+                    process.exit(1);
+//                }
             }
             if (action['type'] == 'Sell') {
                 acts['sells'][action['mname']] = act;
@@ -389,9 +506,30 @@ function processOrders () {
 		}
 //		launchAllSells();
         triggerAll();
+        clearInterval(timer); // Maybe this'll stop the unkillable timers :/
         timer = setInterval (triggerAll, 1000);
         console.log("Setting timer no. " + CircularJSON.stringify(timer));
 	});
+}
+
+function coin_name_from_market (market) {
+
+    if (market == 'USDT_BTC') {
+        return 'USDT';
+    } else {
+        return market.substring(4);
+    }
+/*    res = (/^BTC_(.*)$/, /^(.*)_BTC$/);
+
+    for (re in res) {
+
+        m = market.match(re);
+        if (m != null) {
+
+            console.log ("coin in market " + market + " is " + m[1]);
+            return m[1];
+        }
+    }*/
 }
 
 poloniex.on('open', (err, body) => {
