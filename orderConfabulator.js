@@ -1,4 +1,5 @@
 const utils = require('./utils');
+const l = require ('./log');
 
 var polo = null;
 var c = null;
@@ -32,7 +33,7 @@ module.exports = {
 
         return orders;
         /**/
-
+/*
         // Trivial stupid ass thing
         if (now - act['start'] > act['timeout'] * 1000) {
             act['market_order'] = true;
@@ -41,7 +42,7 @@ module.exports = {
             } else if (act['type'] == 'Sell') {
                 return marketSell(mname, remaining_amount, market);
             } else {
-                console.log("Unknown order type: " + act['type']);
+                l.e("Unknown order type: " + act['type']);
             }
         }
 
@@ -56,7 +57,7 @@ module.exports = {
         if (act['type'] == 'Buy') {
             price = parseFloat(getFilteredSortedOB(market['ob_bids'], act).reverse()[0][0]) +
                     parseFloat(c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
-            console.log("New order buy: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
+            l.d("New order buy price: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
 
             stupidReturnValue[price] = {    'mname': mname,
                                             'rate': price,
@@ -64,17 +65,18 @@ module.exports = {
                                             'amount': remaining_amount, };
         } else if (act['type'] == 'Sell') {
             price = parseFloat(getFilteredSortedOB(market['ob_asks'], act)[0][0]) - parseFloat(c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
-            console.log("New order sell: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
+            l.d("New order sell price: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
 
             stupidReturnValue[price] = {    'mname': mname,
                                             'rate': price,
                                             'type': 'Sell',
                                             'amount': remaining_amount, };
         } else {
-            console.log("Unknown order type: " + act['type']);
+            l.e("Unknown order type: " + act['type']);
         }
 
         return stupidReturnValue;
+*/
 /*        return { price: {'mname': mname,
                          'rate': price,
                          'type': 'Buy',
@@ -86,14 +88,19 @@ module.exports = {
 
 function snapshot_market(act, market) {
 
-    market['snap_bids'] = getFilteredSortedOB(market['ob_bids'], act).reverse();
-    market['snap_asks'] = getFilteredSortedOB(market['ob_asks'], act);
+    if (act['type'] == 'Buy') {
+        market['snap_bids'] = getFilteredSortedOB(market['ob_bids'], act).reverse();
+        market['snap_asks'] = getSortedOB(market['ob_asks'], act);
+    } else {
+        market['snap_bids'] = getSortedOB(market['ob_bids'], act).reverse();
+        market['snap_asks'] = getFilteredSortedOB(market['ob_asks'], act);
+    }
 }
 
 function get_strat (now, act, market, remaining_amount) { // Insert AI here
 
     let timefract = 1000. - (now - act['start']) / act['timeout'];
-    console.log ("timefract: " + timefract + " (" + now + " - " + act['start'] + ") / " + act['timeout']);
+    l.i ("timefract: " + timefract + " (" + now + " - " + act['start'] + ") / " + act['timeout'] + " = " + timefract + ")");
 
     if (timefract > 500) {
         return obtop;
@@ -112,15 +119,15 @@ function obtop (now, act, market, remaining_amount) {
 
         price = parseFloat(market['snap_bids'][0][0]) +
                 parseFloat(c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
-        console.log("OB top buy price is: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
+        l.i("OB top buy price is: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
 
     } else if (act['type'] == 'Sell') {
 
         price = parseFloat(market['snap_asks'][0][0]) - parseFloat(c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
-        console.log("OB top sell price is: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
+        l.i("OB top sell price is: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
 
     } else {
-        console.log("Unknown order type: " + act['type']);
+        l.e("Unknown order type: " + act['type']);
         process.exit(1);
     }
 
@@ -139,15 +146,15 @@ function cross_the_gap (now, act, market, remaining_amount) {
 
         price = parseFloat(market['snap_asks'][0][0]) -
                 parseFloat(c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
-        console.log("Cross-the-gap buy price is: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
+        l.i("Cross-the-gap buy price is: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
 
     } else if (act['type'] == 'Sell') {
 
         price = parseFloat(market['snap_bids'][0][0]) + parseFloat(c['PAPER_TRADE'] ? 0 : c['PRICE_RESOLUTION']);
-        console.log("Cross-the-gap sell price is: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
+        l.i("Cross-the-gap sell price is: " + price + " (" + (act['start'] + act['timeout'] * 1000 - now) + "ms remaining)");
 
     } else {
-        console.log("Unknown order type: " + act['type']);
+        l.e("Unknown order type: " + act['type']);
         process.exit(1);
     }
 
@@ -189,7 +196,7 @@ function market_order (now, act, market, remaining_amount) {
                         'type':   act['type'],
                         'amount':  amount,
         };
-        console.log("Issuing improved market order: " + JSON.stringify(srv));
+        l.i("Issuing improved market order: " + JSON.stringify(srv));
         return srv;
     }
 
@@ -210,7 +217,7 @@ function getFilteredSortedOB (ob, act) {
 
         order_price = order_prices[order_id];
 
-        console.log('Filtering out order at ' + order_price);
+        l.d('Filtering out order at ' + order_price);
         filtered = false;
 //        for (ob_id in Object.keys(myob)) {      // Takes ages. Maybe sort first
         for (ob_id in myobk) {      // Takes ages. Maybe sort first
@@ -220,14 +227,16 @@ function getFilteredSortedOB (ob, act) {
 
             if (utils.are_close (order_price, ob_price, c['PRICE_RESOLUTION'] / 2.)) {   // compare price too?
 
-                console.log("Filtered OB order at " + ob_price);
+                l.i("Filtered OB order at " + ob_price);
                 delete myob[ob_price];
                 filtered = true;
             }
         }
 
-        if (!filtered) {
-            console.log("\nWARNING: Could not filter order at " + order_price);
+        if (!filtered && Object.keys(act['active_orders']).length > 0) {
+
+            l.w("Could not filter order at " + order_price);
+            l.w("Active orders: " + JSON.stringify(act['active_orders'])); // evidence of misplaced orders? No, it's the other OB that's screaming! TODO
         }
     }
 
@@ -241,7 +250,7 @@ function getSortedOB(ob) {
 
 function marketBuy(mname, remaining_amount, market) {
 
-    console.log("\n*** MARKET BUYING " + mname + " ***\n");
+    l.i("\n*** MARKET BUYING " + mname + " ***\n");
 //    price = 2 * getSortedOB(market['ob_bids']).reverse()[0][0];
     price = 1.1 * getSortedOB(market['ob_bids']).reverse()[0][0];
 
@@ -260,7 +269,7 @@ function marketBuy(mname, remaining_amount, market) {
 
 function marketSell(mname, remaining_amount, market) {
 
-    console.log("\n*** MARKET SELL ***\n");
+    l.i("\n*** MARKET SELLING " + mname + " ***\n");
     price = 0.5 * getSortedOB(market['ob_asks'])[0][0];
 
     stupidReturnValue = {};
@@ -281,11 +290,11 @@ function dumpOB(ob) { // TODO: dump both sides of the market, highlight our own 
 
     sorted = getSortedOB(ob);
     len = sorted.length;
-    console.log(`${sorted[0][0]} => ${sorted[0][1]}`);
-    console.log(`${sorted[1][0]} => ${sorted[1][1]}`);
-    console.log(`${sorted[2][0]} => ${sorted[2][1]}`);
-    console.log("...");
-    console.log(`${sorted[len-3][0]} => ${sorted[len-3][1]}`);
-    console.log(`${sorted[len-2][0]} => ${sorted[len-2][1]}`);
-    console.log(`${sorted[len-1][0]} => ${sorted[len-1][1]}`);
+    l.d(`${sorted[0][0]} => ${sorted[0][1]}`);
+    l.d(`${sorted[1][0]} => ${sorted[1][1]}`);
+    l.d(`${sorted[2][0]} => ${sorted[2][1]}`);
+    l.d("...");
+    l.d(`${sorted[len-3][0]} => ${sorted[len-3][1]}`);
+    l.d(`${sorted[len-2][0]} => ${sorted[len-2][1]}`);
+    l.d(`${sorted[len-1][0]} => ${sorted[len-1][1]}`);
 }
