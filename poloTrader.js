@@ -184,10 +184,13 @@ function finalize_act (mname, act) {
     if (polo) {
         polo.returnTradeHistory(mname, Math.floor(act['start']/1000), Math.floor(Date.now()/1000), 1000, function (err, body) {
             if (err) {
-                console.out("Error fetching trade history: " + err);
+                l.e("Error fetching trade history: " + err);
             } else {
                 l.d("Trade history for " + mname + ": " + JSON.stringify(body));
-                fs.writeFile(c['VOLATILE_DIR'] + "tradeHistory_" + mname + "_" + Date.now() + ".json", JSON.stringify(body)); // always empty TODO
+                fs.writeFile(c['VOLATILE_DIR'] + "tradeHistory_" + mname + "_" + Date.now() + ".json", JSON.stringify(body), (err) => {
+                    if (err) throw err;
+                    l.i('Trade history for ' + mname + ' has been saved!');
+                });
             }
         });
     }

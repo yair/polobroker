@@ -8,5 +8,10 @@ module.exports = {
         }
         return false;
     },
+
+    sleep: function (ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    },
+
 };
 

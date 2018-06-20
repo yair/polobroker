@@ -101,10 +101,6 @@ poloniex.returnTicker().then( async (ticker) => {
 });
 }
 
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 poloniex.on('message', (channelName, data, seq) => {
     let line = {'time': Math.floor(new Date()),
                 'seq': seq,
@@ -311,7 +307,10 @@ function finalize (act) {
 
 function archive_act (act) {
 
-    fs.writeFile(c['VOLATILE_DIR'] + "act_archive_" + act['mname'] + "_" + Date.now() + ".json", JSON.stringify(act));
+    fs.writeFile(c['VOLATILE_DIR'] + "act_archive_" + act['mname'] + "_" + Date.now() + ".json", JSON.stringify(act), (err) => {
+        if (err) throw err;
+        l.i('Act for market ' + act['mname'] + ' has been saved!');
+    });
 }
 
 function trigger (mname) {
