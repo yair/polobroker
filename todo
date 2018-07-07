@@ -6,6 +6,7 @@ BrokerBot:
 PGP:
 - Vectorize market costs (trading_consumption) (non-trivial)
 - Add human readable dates in backtest printouts
+- Investigate why plotting is so slow
 
 done
 BB:
