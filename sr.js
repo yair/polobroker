@@ -1,7 +1,16 @@
 const Poloniex = require('poloniex-api-node');
 const fs = require('fs');
 
-const basedir = '/home/yair/w/dm_raw/sr/' + `${Math.floor(new Date() / 1000)}/`;
+const TESTING = false;
+let test_counter = 0;
+
+const timestamp = `${Math.floor(new Date() / 1000)}`;
+const basetmp = '/tmp/sr/';
+const stopfile = `${basetmp}stop`;
+const basedir = `${basetmp}${timestamp}/`;
+//const basedir = '/home/yair/w/dm_raw/sr/' + `${Math.floor(new Date() / 1000)}/`;
+const archive = `/home/yair/w/dm_raw/sr/sr_${timestamp}.txz`;
+
 fs.mkdirSync(basedir);
 console.log(`Base folder created at ${basedir}`);
 let markets = {};
@@ -51,6 +60,14 @@ poloniex.on('message', (channelName, data, seq) => {
     } else {
         console.log(`Unrecognized channel: ${channelName}`);
     }
+    if (TESTING && test_counter++ == 100) {
+        console.log("In testing mode. Stopping after 100 messages.");
+        poloniex.closeWebSocket();
+    }
+    if (fs.existsSync(stopfile)) {
+        console.log(`Triggered to stop by the existence of ${stopfile}`);
+        poloniex.closeWebSocket();
+    }
 
 //      if (channelName === 'BTC_ETC') {
 //              console.log(`/order book and trade updates received for currency pair ${channelName}`);
@@ -60,20 +77,51 @@ poloniex.on('message', (channelName, data, seq) => {
 });
 
 poloniex.on('open', () => {
-      console.log(`Poloniex WebSocket connection open`);
+    console.log(`Poloniex WebSocket connection open`);
 });
 
 poloniex.on('close', (reason, details) => {
-      console.log(`Poloniex WebSocket connection disconnected`);
+    console.log(`Poloniex WebSocket connection disconnected. Archiving results.`);
+    archive_results();
 });
 
 poloniex.on('error', (error) => {
-      console.log(`An error has occured: ${JSON.stringify(error)}`);
+    console.log(`An error has occured: ${JSON.stringify(error)}`);
 });
 
 poloniex.on('heartbeat', () => {
-      console.log('Heartbeat - 60 second timeout');
+    console.log('Heartbeat - 60 second timeout');
 });
 
 console.log('2');
 
+function archive_results () {
+
+    const { exec } = require('child_process');
+
+    exec(`cd ${basetmp} && tar cJf ${archive} ${timestamp}`, (err, stdout, stderr) => {
+
+        if (err) {
+            console.log(`Failed to archive session results: ${err}`);
+            return;
+        }
+
+        console.log(`Results archiving done.`);
+        console.log(`stdout: ${stdout}`);
+        console.log(`stderr: ${stderr}`);
+
+        console.log(`Deleting uncompressed files from ${basedir}`);
+
+        exec(`cd ${basetmp} && rm -Rf ${timestamp}`, (err, stdout, stderr) => {
+
+            if (err) {
+                console.log(`Failed to remove session uncompressed files: ${err}`);
+                return;
+            }
+
+            console.log(`Removed uncompressed session files.`);
+            console.log(`stdout: ${stdout}`);
+            console.log(`stderr: ${stderr}`);
+        });
+    });
+}
