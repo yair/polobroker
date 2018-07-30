@@ -4,9 +4,9 @@ BrokerBot:
 - Extract the actual trades made within each session and compare them both to requested price, to order placements and possibly other stats (gap boundaries, other stuff). Best if it can be made into charts/videos to see how reasonable it looks. This should be made for indvidual sessions and for multiple instances of the same market, to figure out which markets are liquid enough for trading and which are not.
 - Train an RL bot on the price movements in different markets to see what the best strategy for placing orders is. Do it for multiple time scales 
 PGP:
-- Vectorize market costs (trading_consumption) (non-trivial)
+- Vectorize market costs (trading_consumption) (non-trivial). Actually a tensor, since we want different vars for buy and sell. (These might be estimated on every step from e.g. aeorl)
 - Add human readable dates in backtest printouts
-- Investigate why plotting is so slow
+- Investigate why plotting is so slow, and getting slower with time. :/
 
 done
 BB:

@@ -1,23 +1,76 @@
-const Poloniex = require('poloniex-api-node');
+//const Poloniex = require('poloniex-api-node');
+const binance = require('node-binance-api')().options({
+  APIKEY: '09UxIZ56EDIk3qDAhPYNmHvBiApnZaWhNu55H77xc3sZiY1g2S7BT5z35zFaXUyg',
+  APISECRET: 'pDYr7ro4DMcFiH9fASjnYgna2jR3hIyVYqw8ePZed9Ulatoz5mq2JE9UrI3mSm7h',
+  useServerTime: true, // If you get timestamp errors, synchronize to server time at startup
+  test: true // If you want to use sandbox mode where orders are simulated
+});
 const fs = require('fs');
 
 const TESTING = false;
 let test_counter = 0;
 
 const timestamp = `${Math.floor(new Date() / 1000)}`;
-const basetmp = '/tmp/sr/';
+const basetmp = '/tmp/sr_binance/';
 const stopfile = `${basetmp}stop`;
 const basedir = `${basetmp}${timestamp}/`;
 //const basedir = '/home/yair/w/dm_raw/sr/' + `${Math.floor(new Date() / 1000)}/`;
-const archive = `/home/yair/w/dm_raw/sr/sr_${timestamp}.txz`;
+const archive = `/home/yair/w/dm_raw/sr_binance/srb_${timestamp}.txz`;
 
 fs.mkdirSync(basedir);
 console.log(`Base folder created at ${basedir}`);
 let markets = {};
 
-//let poloniex = new Poloniex({'proxy': '127.0.0.1:4711'});
-let poloniex = new Poloniex();
+binance.prices((error, ticker) => {
+//  console.log("prices()", ticker);
+    for (market in Object.keys(ticker)) {
+        let mname = Object.keys(ticker)[market];
+		if (mname != 'BTCUSDT' && mname.substring(mname.length - 3, mname.length) != 'BTC')
+			continue;
+		let fname = `${basedir}${mname}`
+        let stream = fs.createWriteStream(fname);
+		binance.websockets.depth([mname], (depth) => {
+        	stream.write(`${JSON.stringify(depth)}\n`);
+		});
+		binance.websockets.trades([mname], (trades) =>{
+        	stream.write(`${JSON.stringify(trades)}\n`);
+		});
+		binance.depth(mname, (error, depth, symbol) => {
+        	stream.write(`${JSON.stringify(depth)}\n`);
+		}, 1000);
+	}
+//  console.log("Price of BTC: ", ticker.BTCUSDT);
+});
+return
 
+binance.websockets.depth(['BNBBTC'], (depth) => {		// ok, that's one, now we also need the trades, and to get the initial ob.
+  console.log(depth)
+//  let {e:eventType, E:eventTime, s:symbol, u:updateId, b:bidDepth, a:askDepth} = depth;
+/*  console.log(symbol+" market depth update");
+  console.log("eventType: " + eventType)
+  console.log("eventTime: " + eventTime)
+  console.log("bidDepth: " + bidDepth)
+  console.log("askDepth: " + askDepth)*/
+//  console.log(bidDepth, askDepth);
+});
+
+binance.websockets.trades(['BNBBTC', 'ETHBTC'], (trades) => {
+  console.log(trades)
+/*  let {e:eventType, E:eventTime, s:symbol, p:price, q:quantity, m:maker, a:tradeId} = trades;
+  console.log(symbol+" trade update. price: "+price+", quantity: "+quantity+", maker: "+maker);*/
+});
+/*
+binance.websockets.depthCache(['BNBBTC'], (symbol, depth) => {
+      let bids = binance.sortBids(depth.bids);
+      let asks = binance.sortAsks(depth.asks);
+      console.log(symbol+" depth cache update");
+      console.log("bids", bids);
+      console.log("asks", asks);
+      console.log("best bid: "+binance.first(bids));
+      console.log("best ask: "+binance.first(asks));
+});*/
+
+return
 ticker_stream = fs.createWriteStream(basedir + 'ticker');
 poloniex.subscribe('ticker');
 
