@@ -1,0 +1,15 @@
+Need to debug and optimize.
+BrokerBot:
+- Work directly off omega, instead of relying on pgp to generate the correct orders (which it doesn't).
+- Extract the actual trades made within each session and compare them both to requested price, to order placements and possibly other stats (gap boundaries, other stuff). Best if it can be made into charts/videos to see how reasonable it looks. This should be made for indvidual sessions and for multiple instances of the same market, to figure out which markets are liquid enough for trading and which are not.
+- Train an RL bot on the price movements in different markets to see what the best strategy for placing orders is. Do it for multiple time scales 
+PGP:
+- Vectorize market costs (trading_consumption) (non-trivial)
+- Add human readable dates in backtest printouts
+- Investigate why plotting is so slow
+
+done
+BB:
+PGP:
+- export omega directly
+- Make it go faster. Possibly needs to write some new infra code to load only necessary data from DB, dump excrepts while training that can be quickly loaded in prod, and skip unnecessary data mangling and api calls. So far - reduced global_data_panel calls to 1, increase db cache. This is not enough. Added the coindate index, now it's down from 8 minutes to 20 seconds. That's more than enough for now.
