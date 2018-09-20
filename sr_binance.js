@@ -6,6 +6,7 @@ const binance = require('node-binance-api')().options({
   test: true // If you want to use sandbox mode where orders are simulated
 });
 const fs = require('fs');
+const u = require('./utils')
 
 const TESTING = false;
 let test_counter = 0;
@@ -19,18 +20,26 @@ const archive = `/home/yair/w/dm_raw/sr_binance/srb_${timestamp}.txz`;
 
 fs.mkdirSync(basedir);
 console.log(`Base folder created at ${basedir}`);
-let markets = {};
+let latest_depths = {};
+let golden_ratio = 1.61803398875;
 
-binance.prices((error, ticker) => {
+binance.prices (async (error, ticker) => {
 //  console.log("prices()", ticker);
     for (market in Object.keys(ticker)) {
         let mname = Object.keys(ticker)[market];
+        latest_depths[mname] = new Date();
 		if (mname != 'BTCUSDT' && mname.substring(mname.length - 3, mname.length) != 'BTC')
 			continue;
 		let fname = `${basedir}${mname}`
         let stream = fs.createWriteStream(fname);
 		binance.websockets.depth([mname], (depth) => {
         	stream.write(`${JSON.stringify(depth)}\n`);
+            if ((new Date() - latest_depths[mname]) > 3600 * 1000 * golden_ratio) { // refresh partial OBs
+		        binance.depth(mname, (error, depth, symbol) => {
+                	stream.write(`${JSON.stringify(depth)}\n`);
+        		}, 1000);
+                latest_depths[mname] = new Date();
+            }
 		});
 		binance.websockets.trades([mname], (trades) =>{
         	stream.write(`${JSON.stringify(trades)}\n`);
@@ -38,6 +47,7 @@ binance.prices((error, ticker) => {
 		binance.depth(mname, (error, depth, symbol) => {
         	stream.write(`${JSON.stringify(depth)}\n`);
 		}, 1000);
+        await u.sleep(1000);
 	}
 //  console.log("Price of BTC: ", ticker.BTCUSDT);
 });
