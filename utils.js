@@ -18,16 +18,24 @@ module.exports = {
     },
 
     midprice: function (market) {
-        return .5 * (getSortedOB(market['ob_bids']).reverse()[0][0] + getSortedOB(market['ob_asks'])[0][0]);
+        getSortedOB = module.exports['getSortedOB'];
+//        console.log('midprice: mname=' + market['mname'] + ' bottom=' + getSortedOB(market['ob_bids']).reverse()[0][0] + ' top=' + getSortedOB(market['ob_asks'])[0][0]);
+        ret = .5 * (parseFloat(getSortedOB(market['ob_bids']).reverse()[0][0]) + parseFloat(getSortedOB(market['ob_asks'])[0][0]));
+//        console.log('midprice: returning ' + ret);
+        return ret;
+//        return .5 * (getSortedOB(market['ob_bids']).reverse()[0][0] + getSortedOB(market['ob_asks'])[0][0]);
     },
 
     get_depth_price: function  (no_deeper_than, ob) {
-        console.log ('get_depth_price: no_deeper_than = ' + str(no_deeper_than) + 'altsat');
+        console.log ('get_depth_price: no_deeper_than = ' + no_deeper_than + 'altsat');
         v = 0;
-        i = 0;
-        for ((price, volume) in ob) {
-            i++;
-            console.log('price = ' + str(price) + 'bsat => v + volume = ' + str(v) + 'altsat + ' + str(volume) + 'altsat');
+//        i = 0;
+//        for ((price, volume) in ob) {
+        for (order in ob) {
+            price = order[0];
+            volume = order[1];
+//            i++;
+            console.log('price = ' + price + 'bsat => v + volume = ' + v + 'altsat + ' + volume + 'altsat');
             if (v + volume > no_deeper_than) {
                 return price;
             } else {
