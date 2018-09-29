@@ -15,7 +15,7 @@ const c = { //TODO: move to config file
     MINIMUM_BTC_TRADE: 0.000001,   // 100sat @poloni
     PRICE_RESOLUTION: 0.00000001,  // 1sat @poloni
     PENDING_TIMEOUT: 15000,        // ms
-    TIMER_PERIOD: 3000,            // ms
+    TIMER_PERIOD: 2000,            // ms
     LOG_STREAMS: false,
     VOLATILE_DIR: '/home/yair/w/volatile/',
     ORDERS_FN: 'orders.json',
@@ -263,7 +263,11 @@ function updateFromStream (mname, payload, seq) {
 function finalize (act) {
 
     acts['archive'][act['mname']] = act;
-    delete acts[act['type'] == 'Buy' ? 'buys' : 'sells'][act['mname']];
+    if (act['mname'] == 'USDT_BTC') {
+    delete acts[act['type'] == 'Buy' ? 'sells' : 'buys'][act['mname']];
+    } else {
+        delete acts[act['type'] == 'Buy' ? 'buys' : 'sells'][act['mname']];
+    }
 
     l.i(act['type'] + " " + act['coin_name'] + " archived. Now fetching and cancelling open orders.");
 
@@ -313,7 +317,7 @@ function archive_act (act) {
     });
 }
 
-function trigger (mname) {
+async function trigger (mname) {
     l.i(`\nTriggered: ${mname}: ${Object.keys(acts['sells']).length} sells (${Object.keys(acts['sells'])}), ${Object.keys(acts['buys']).length} buys (${Object.keys(acts['buys'])})`); //TODO: replace newline with a logger flag
     if (mname == undefined) {
         l.e("Triggered on undefined market! Stack:");
@@ -336,6 +340,7 @@ function trigger (mname) {
         if (!acts['sells'][mname]['triggerRunning']) {
             acts['sells'][mname]['triggerRunning'] = true;
             poloTrader.triggerSell(mname, acts['sells'][mname], markets[mname]);
+            await utils.sleep(200);
             acts['sells'][mname]['triggerRunning'] = false;
         }
     } else if (Object.keys(acts['buys']).length != 0 && acts['buys'].hasOwnProperty(mname)) {
@@ -351,6 +356,7 @@ function trigger (mname) {
 //            console.log('markets[' + mname + ']["ob_bids"]=');
 //            console.log(markets[mname]['ob_bids']);
             poloTrader.triggerBuy(mname, acts['buys'][mname], markets[mname]);
+            await utils.sleep(200);
             acts['buys'][mname]['triggerRunning'] = false;
         }
     } else {
@@ -384,7 +390,17 @@ function triggerAll () {
         l.i("\ntriggerAll called with nothing to do. Finalizing session. timer=" + CircularJSON.stringify(timer)); // TODO: kill timer if not dead, or see why it's not dead.
         clearInterval(timer);
         if (fs.existsSync(c['VOLATILE_DIR'] + c['ORDERS_FN'])) {
-            fs.copyFileSync(c['VOLATILE_DIR'] + c['ORDERS_FN'],
+            fs.rename(c['VOLATILE_DIR'] + c['ORDERS_FN'],
+                      c['VOLATILE_DIR'] + c['ORDERS_FN'] + ".bak-" + moment(Date.now()).utc().format("YYYYMMDDHHmmss"),
+                      function (err) {
+                          if (err) {
+    			            l.e(`${c['VOLATILE_DIR'] + c['ORDERS_FN']} failed to be moved: ` + err);
+                          } else {
+        			        l.i(`${c['VOLATILE_DIR'] + c['ORDERS_FN']} moved.`);
+                          }
+                      });
+        }
+/*            fs.copyFileSync(c['VOLATILE_DIR'] + c['ORDERS_FN'],    //TODO: This occasionally causes the whole orders file to be re-executed.
                             c['VOLATILE_DIR'] + c['ORDERS_FN'] + ".bak-" + moment(Date.now()).utc().format("YYYYMMDDHHmmss"));
     		fs.unlink (c['VOLATILE_DIR'] + c['ORDERS_FN'], function (err) { 
                 if (err) {
@@ -393,7 +409,7 @@ function triggerAll () {
         			l.e(`${c['VOLATILE_DIR'] + c['ORDERS_FN']} read and removed.`);
                 }
     		});
-        }
+        }*/
     }
 }
 
@@ -440,9 +456,20 @@ function processOrders () {
             action = actions[i];
             if (action['mname'] == 'USDT_BTC') {
                 invert_action(action);
-            } else if (action['amount'] * action['price'] < c['MINIMUM_TRADE']) {
-                continue;
+            } else {
+                if (action['type'] == 'Sell' && (action['previous_balance'] - action['amount']) * action['price'] < c['MINIMUM_TRADE']) {
+                    console.log(action['mname'] + ': Remaining balance after sale will be smaller than minimum trade. Selling all');
+                    action['amount'] = action['previous_balance'];
+                }
+                if (action['amount'] * action['price'] < c['MINIMUM_TRADE']) {
+                    console.log(action['amount'] + ' * ' + action['price'] + ' < ' + c['MINIMUM_TRADE'] + ' Dropping ' + action['mname'] + ' action.');
+                    continue;
+                }
             }
+//            } else if (action['amount'] * action['price'] < c['MINIMUM_TRADE']) {
+//                console.log(action['amount'] + ' * ' + action['price'] + ' < ' + c['MINIMUM_TRADE'] + ' Dropping ' + action['mname'] + ' action.');
+//                continue;
+//            }
 			let act = {
                 mname: action['mname'],
 				start: Date.now(),
@@ -472,15 +499,19 @@ function processOrders () {
                 l.e(`Uknown market ${act['mname']}. Aborting.`);
                 process.exit(1);
             }
-            if (act['type'] == 'Sell' && (act['prev_balance'] + c['PRICE_RESOLUTION'] - act['total_amount'] < 0.)) {
+            if (act['type'] == 'Sell' && act['mname'] != 'USDT_BTC' && (act['prev_balance'] + c['PRICE_RESOLUTION'] - act['total_amount'] < 0.)) {
 //                if (act['mname'] != 'USDT_BTC') {
-                    l.e(`Trying to sell more than we have. Aborting.`);
+                    l.e(`Trying to sell more than we have. (` + act['prev_balance'] + ' < ' + act['total_amount'] + `). Aborting.`);
                     process.exit(1);
 //                }
             }
-            if (action['type'] == 'Sell') {
+//            if (action['type'] == 'Sell') {
+            if ((action['type'] == 'Sell' && act['mname'] != 'USDT_BTC') ||
+                (action['type'] == 'Buy'  && act['mname'] == 'USDT_BTC')) {
                 acts['sells'][action['mname']] = act;
-            } else if (action['type'] == 'Buy') {
+//            } else if (action['type'] == 'Buy') {
+            } else if ((action['type'] == 'Buy'  && act['mname'] != 'USDT_BTC') ||
+                       (action['type'] == 'Sell' && act['mname'] == 'USDT_BTC')) {
                 acts['buys'][action['mname']] = act;
             } else {
                 l.e(`Unknown action: ${action['type']}. Aborting.`);

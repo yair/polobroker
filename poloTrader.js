@@ -284,7 +284,10 @@ function update_orders (mname, act, market) {
                             id: order['orderNumber'],
                         };
                         if (order['amount'] != order['startingAmount']) {
+                            console.log(act['mname'] + ': amount changed -- ' + order['amount'] + ' != ' + order['startingAmount']);
                             act['amount_changed'] = true;
+                        } else {
+                            console.log(act['mname'] + ': amount the same -- ' + order['amount'] + ' == ' + order['startingAmount']);
                         }
                     }
                     act['pending_add'] = {};
@@ -319,11 +322,17 @@ function update_orders (mname, act, market) {
 
 function remaining_amount (act) {
 
+/*    if (act['mname'] == 'USDT_BTC') { //stopgap
+        return act['total_amount'];
+    }*/
 //    console.log("remaining amount -- prev_balance = " + act['prev_balance'] + " current_balance = " + act['current_balance'] + " total_amount = " + act['total_amount']);
 
     if (act['type'] == 'Buy') { // TODO: Should also restrict buys on BTC shortage - prolly by averaging on all open buys
         let rem = parseFloat(act['prev_balance']) + parseFloat(act['total_amount']) - parseFloat(act['current_balance']);
         let available_to_buy = parseFloat(act['btc_balance']) * parseFloat(act['price']);
+        if (act['mname'] == 'USDT_BTC') {
+            available_to_buy = parseFloat(act['current_balance']) / parseFloat(act['price']);
+        }
         l.i("remaining " + act['mname'] + " amount: " + rem + "(we can afford " + available_to_buy + ")");
         if (available_to_buy < rem) {
             l.i("Restricting buying amount to remaining btc balance: " + rem + " => " + available_to_buy);
@@ -332,9 +341,17 @@ function remaining_amount (act) {
         return rem;
     } else if (act['type'] == 'Sell') {
         let rem = - parseFloat(act['prev_balance']) + parseFloat(act['total_amount']) + parseFloat(act['current_balance']);
-        if (parseFloat(act['current_balance']) < rem) {
-            l.w("Restricting selling amount to remaining balance: " + rem + " => " + parseFloat(act['current_balance']));
-            return parseFloat(act['current_balance']);
+        let available_to_sell = parseFloat(act['current_balance']);
+        if (act['mname'] == 'USDT_BTC') {
+            available_to_sell = parseFloat(act['btc_balance']);
+            if (act['btc_balance'] == null) {
+                l.w('Have no BTC balance yet, so skipping restrictions');
+                return rem;
+            }
+        }
+        if (available_to_sell < rem) {
+            l.w("Restricting selling amount to remaining balance: " + rem + " => " + available_to_sell);
+            return available_to_sell;
         }
         return rem;
     } else {
@@ -347,7 +364,12 @@ function order_diff (orders, new_orders) {
 
     old_orders = JSON.parse (JSON.stringify (orders)); // This function cannot make changes to the live set, that requires exch callback
     diff = { remove: {}, add: {} };
-
+/*
+    if (true) { // Something is fooked here. Always replacing all.
+        diff = { remove: orders, add: new_orders };
+        return diff;
+    }
+*/
     for (old_order in old_orders) {
 //        console.log("old_order = " + old_order);
 /*        if (exists in new orders) {
@@ -361,24 +383,26 @@ function order_diff (orders, new_orders) {
             remove from old, delete old order
         }*/
         if (old_order in new_orders) {
+            console.log('old_order = ' + JSON.stringify(old_order));
+            console.log('new_orders = ' + JSON.stringify(new_orders));
             if (old_orders[old_order]['amount'] != new_orders[old_order]['amount']) { // same price, different amount
-//                console.log(`Replacing amount in existing order ${old_order} - ${old_orders[old_order]['amount']} => ${new_orders[old_order]['amount']}`);
+                console.log(`Replacing amount in existing order ${old_order} - ${old_orders[old_order]['amount']} => ${new_orders[old_order]['amount']}`);
                 diff['remove'][old_order] = old_orders[old_order];
                 diff['add'][old_order] = new_orders[old_order];
                 delete old_orders[old_order];
                 old_orders[old_order] = new_orders[old_order];
             } else {
-//                console.log(`Found match in old orders for ${old_order}. Skipping update`);
+                console.log(`Found match in old orders for ${old_order}. Skipping update`);
             }
             delete new_orders[old_order];
         } else {
-//            console.log(`Removing old order at ${old_order} since it isn't in the new ones.`);
+            console.log(`Removing old order at ${old_order} since it isn't in the new ones.`);
             diff['remove'][old_order] = old_orders[old_order];
             delete old_orders[old_order];
         }
     }
     for (new_order in new_orders) {
-//        console.log(`Adding new order at ${new_order} since it isn't in the old ones.`);
+        console.log(`Adding new order at ${new_order} since it isn't in the old ones.`);
         diff['add'][new_order] = new_orders[new_order];
         old_orders[new_order] = new_orders[new_order];
     }
@@ -456,8 +480,8 @@ function set_new_orders(act, adds) {
                 if (body == undefined) {
                     l.e("body undefined.");
                 } else if (body['error'].match('Not enough')) { // TODO: If this happens every time, start with a reduced amount.
-                    l.e("Reducing total act amount from " + act['total_amount'] + " to " + (act['total_amount'] * 0.998)); // TODO: replace with balance calc
-                    act['total_amount'] = 0.998 * parseFloat(act['total_amount']); // Like this? Do we need to tell anyone that an order wasn't executed?
+                    l.e("Reducing total act amount from " + act['total_amount'] + " to " + (act['total_amount'] * 0.98)); // TODO: replace with balance calc
+                    act['total_amount'] = 0.98 * parseFloat(act['total_amount']); // Like this? Do we need to tell anyone that an order wasn't executed?
                     act['amount_changed'] = true; // Is this enough? For all cases?
                     if (act['market_order']) {
                         act['done'] = true; // something is obviously wrong and we're outta time. TODO: how did we get here?
@@ -469,6 +493,8 @@ function set_new_orders(act, adds) {
                 } else if (body['error'].match('Total must be at least')) {
                     l.w("Order too small, just skip it.");
                     act['done'] = true;
+                } else if (body['error'].match('Please do not make more than')) {
+                    l.w("API rate limit exceeded. What do I do about it?");
                 } else { 
                     l.e("Unhandled error. WAT DO");
                     process.exit(0);
@@ -476,6 +502,7 @@ function set_new_orders(act, adds) {
 //                process.exit(0);
             } else {
                 l.i(`\nOrder is good for ${order['mname']}! limit order response is ${JSON.stringify(body)}. ID is ${body['orderNumber']}`);
+                l.i ('Full order: ' + JSON.stringify (order));
                 order['id'] = body['orderNumber'];
 //                act['active_orders'][order['rate']] = body; // or something. Do we get and amount as well? What about market? And move the id to first level plox
                 act['active_orders'][order_rate] = order;
@@ -518,7 +545,9 @@ function replace_orders (act, diff) {       // TODO: Add another stage of moving
             // moveOrder(orderNumber, rate, amount, immediateOrCancel, postOnly [, callback])
             polo.moveOrder(remove['id'], add['rate'], add['amount'], false, false, function (err, body) {
 
-                l.i("moveOrder returned. body = " + JSON.stringify(body));
+                if (typeof body !== 'undefined' && body)
+                    l.i("moveOrder returned. body = " + JSON.stringify(body));
+
                 if (err) {
                     l.e("\nFailed to move order: " + err);
                     if (body['error'].match('Invalid order number')) {
@@ -551,6 +580,8 @@ function replace_orders (act, diff) {       // TODO: Add another stage of moving
         act['pending_remove'][order_rate] = order;
         delete act['active_orders'][order_rate];
         act['pending_timestamp'] = Date.now();
+
+        console.log('removing order ' + JSON.stringify (order) + ' (order_id=' + order_id + ', order_rate=' + order_rate + ')');
 
 		remove_order(order, function (err) {
 
