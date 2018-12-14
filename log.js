@@ -31,7 +31,7 @@ nl = {
     
 var defaults = {
 
-    min:    'debug',
+    min:    'info',
     color:  false,
     level:  'info',
 };

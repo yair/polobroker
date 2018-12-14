@@ -19,9 +19,9 @@ module.exports = {
 
     midprice: function (market) {
         getSortedOB = module.exports['getSortedOB'];
-//        console.log('midprice: mname=' + market['mname'] + ' bottom=' + getSortedOB(market['ob_bids']).reverse()[0][0] + ' top=' + getSortedOB(market['ob_asks'])[0][0]);
+        console.log('midprice: mname=' + market['mname'] + ' bottom=' + getSortedOB(market['ob_bids']).reverse()[0][0] + ' top=' + getSortedOB(market['ob_asks'])[0][0]);
         ret = .5 * (parseFloat(getSortedOB(market['ob_bids']).reverse()[0][0]) + parseFloat(getSortedOB(market['ob_asks'])[0][0]));
-//        console.log('midprice: returning ' + ret);
+        console.log('midprice: returning ' + ret);
         return ret;
 //        return .5 * (getSortedOB(market['ob_bids']).reverse()[0][0] + getSortedOB(market['ob_asks'])[0][0]);
     },
@@ -43,6 +43,15 @@ module.exports = {
             }
         }
         throw "OB depleted";
+    },
+    
+    remove_self_from_ob: function (ob, act) {
+        ret = JSON.parse (JSON.stringify (ob));
+        for (oid in Object.keys(act['active_orders'])) {
+            delete ret[Object.keys(act['active_orders'])[oid]];
+            console.log(act['mname'] + ': removed self at ' + Object.keys(act['active_orders'])[oid] + ' from ob');
+        }
+        return ret;
     },
 };
 

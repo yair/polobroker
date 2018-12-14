@@ -105,7 +105,7 @@ function archive_results () {
 
     const { exec } = require('child_process');
 
-    exec(`cd ${basetmp} && tar cJf ${archive} ${timestamp}`, (err, stdout, stderr) => {
+    exec(`cd ${basetmp} && nice tar cJf ${archive} ${timestamp}`, (err, stdout, stderr) => {
 
         if (err) {
             console.log(`Failed to archive session results: ${err}`);

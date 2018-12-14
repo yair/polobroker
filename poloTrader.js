@@ -4,6 +4,7 @@ const orderConfabulator = require('./rlexecConfabulator');
 const utils = require('./utils');
 const fs = require('fs');
 const l = require ('./log');
+const n = require ('./nijez');
 
 var polo = null;
 var c = null;
@@ -181,20 +182,51 @@ console.log(`---> Comparing ticker['last']=${ticker['last']} to rate=${rate}`);
 
 function finalize_act (mname, act) {
 
-    // dump order history
+    // dump order history (tradeHistory gives far more orders than the date range specifies (maybe we're mixing local and utc times?))
     if (polo) {
-        polo.returnTradeHistory(mname, Math.floor(act['start']/1000), Math.floor(Date.now()/1000), 1000, function (err, body) {
+        l.i ('Getting trade history for the date range ' + Math.floor(act['start']/1000) + ' to ' + Math.floor(Date.now()/1000) + ' (' + (Math.floor(Date.now()/1000) - Math.floor(act['start']/1000)) + 's)');
+            polo.returnTradeHistory(mname, Math.floor(act['start']/1000), Math.floor(Date.now()/1000), 1000, function (err, body) {
             if (err) {
                 l.e("Error fetching trade history: " + err);
             } else {
-                l.d("Trade history for " + mname + ": " + JSON.stringify(body));
-                fs.writeFile(c['VOLATILE_DIR'] + "tradeHistory_" + mname + "_" + Date.now() + ".json", JSON.stringify(body), (err) => {
+                l.i("Trade history for " + mname + ": " + JSON.stringify(body));
+                trade_fn = c['VOLATILE_DIR'] + "tradeHistory_" + mname + "_" + Date.now() + ".json";
+                fs.writeFile(trade_fn, JSON.stringify(body), (err) => {
                     if (err) throw err;
-                    l.i('Trade history for ' + mname + ' has been saved!');
+                    l.i('Trade history for ' + mname + ' has been saved to ' + trade_fn);
                 });
+
+                btotam = bmbtotam = stotam = smbtotam = 0;
+                for (trid in body) {
+                    if (body[trid].type == 'sell') {
+                        stotam += parseFloat(body[trid].amount);
+                        smbtotam += 1000 * parseFloat(body[trid].amount) * parseFloat(body[trid].price);
+                    } else {
+                        btotam += parseFloat(body[trid].amount);
+                        bmbtotam += 1000 * parseFloat(body[trid].amount) * parseFloat(body[trid].price);
+                    }
+                }
+                if (body[0] != undefined) {
+//                    n.nijez ((body[0].type == 'buy' ? 'Bought ' : 'Sold ') + totam + ' ' + mname + ' (' + mbtotam + 'mB)');
+//                    n.nijez ('Bought ' + btotam + mname + ' (' + bmbtotam + 'mB) and sold ' + stotam + mname + ' (' + smbtotam + 'mB)');
+                }
             }
         });
     }
+    // report actions
+    // "exch_trades":{"40543277":{"newTrade":{"tradeID":"2942039","type":"buy","rate":"0.00047968","amount":"0.01779805","total":"0.00000854","date":"2018-11-27T10:02:09.000Z"}}
+    // ,"exch_trades":{"40537864":{"newTrade":{"tradeID":"2940575","type":"sell","rate":"0.00046048","amount":"1.00000000","total":"0.00046048","date":"2018-11-27T08:30:48.000Z"}},"40537872":{"newTrade":{"tradeID":"2940576","type":"sell","rate":"0.00045813","amount":"1.00000000","total":"0.00045813","date":"2018-11-27T08:31:08.000Z"}},"40537875":{"newTrade":{"tradeID":"2940581","type":"sell","rate":"0.00045812","amount":"270.75658893","total":"0.12403901","date":"2018-11-27T08:31:12.000Z"}},"40537876":{"newTrade":{"tradeID":"2940582","type":"buy","rate":"0.00045812","amount":"1.25597804","total":"0.00057539","date":"2018-11-27T08:31:13.000Z"}},"40537887":{"newTrade":{"tradeID":"2940585","type":"sell","rate":"0.00045763","amount":"42.89993334","total":"0.01963230","date":"2018-11-27T08:31:25.000Z"}}
+    totam = mbtotam = 0.;
+    for (i in Object.keys(act['exch_trades'])) {
+        trid = Object.keys(act['exch_trades'])[i];
+        if (act['exch_trades'][trid]['newTrade'] == undefined)
+            continue;
+        l.i('Adding trade ' + JSON.stringify (act['exch_trades'][trid]));
+        totam += parseFloat(act['exch_trades'][trid]['newTrade']['amount']);
+        mbtotam += parseFloat(act['exch_trades'][trid]['newTrade']['rate']) * parseFloat(act['exch_trades'][trid]['newTrade']['amount']);
+    }
+    n.nijez ((act['type'] == 'Buy' ? 'Bought ' : 'Sold ') + totam + act['coin_name'] + ' (' + (mbtotam * 1000) + ' mB)');
+
     act['done'] = true;
 }
 
@@ -329,7 +361,9 @@ function remaining_amount (act) {
 
     if (act['type'] == 'Buy') { // TODO: Should also restrict buys on BTC shortage - prolly by averaging on all open buys
         let rem = parseFloat(act['prev_balance']) + parseFloat(act['total_amount']) - parseFloat(act['current_balance']);
-        let available_to_buy = parseFloat(act['btc_balance']) * parseFloat(act['price']);
+//        let available_to_buy = parseFloat(act['btc_balance']) * parseFloat(act['price']);
+        let available_to_buy = parseFloat(act['btc_balance']) / parseFloat(act['price']);
+        l.i("available to buy = btc / price = " + act['btc_balance'] + " / " + act['price'] + " = " + parseFloat(act['btc_balance']) / parseFloat(act['price']));
         if (act['mname'] == 'USDT_BTC') {
             available_to_buy = parseFloat(act['current_balance']) / parseFloat(act['price']);
         }

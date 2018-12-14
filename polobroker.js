@@ -15,7 +15,7 @@ const c = { //TODO: move to config file
     MINIMUM_BTC_TRADE: 0.000001,   // 100sat @poloni
     PRICE_RESOLUTION: 0.00000001,  // 1sat @poloni
     PENDING_TIMEOUT: 15000,        // ms
-    TIMER_PERIOD: 2000,            // ms
+    TIMER_PERIOD: 5000,            // ms
     LOG_STREAMS: false,
     VOLATILE_DIR: '/home/yair/w/volatile/',
     ORDERS_FN: 'orders.json',
@@ -58,7 +58,7 @@ poloTrader.init(c, poloniex);
 
 // Testing - subscribing only to the ticker, and only when websocket is connected, to the rest of the coins.
 
-l.i("Subscribing to polo ticker");
+l.d("Subscribing to polo ticker");
 poloniex.subscribe('ticker');
 subscribeToAllCoins();
 // Set up polo handlers
@@ -199,7 +199,7 @@ function updateFromStream (mname, payload, seq) {
         if (item_type == 'orderBook') {
             markets[mname]['ob_asks'] = data['asks'];   // copy the whole thing
             markets[mname]['ob_bids'] = data['bids'];   // copy the whole thing
-            l.i("Populated order book for " + mname);
+            l.d("Populated order book for " + mname);
         } else if (item_type == 'orderBookModify') {
             if (data['type'] == 'bid') {
                 markets[mname]['ob_bids'][data['rate']] = data['amount'];
@@ -364,7 +364,7 @@ async function trigger (mname) {
     }
 }
 
-function triggerAll () {
+async function triggerAll () {
 
     if (Object.keys(acts['sells']).length != 0) {
         l.v("acts['sells'] = " + JSON.stringify(acts['sells']));
@@ -410,6 +410,23 @@ function triggerAll () {
                 }
     		});
         }*/
+        // Reset order books, because we're having trouble with out of sync ones.
+        process.exit(0);
+        for (mid in Object.keys(markets)) {
+            mname = Object.keys(markets)[mid];
+//            l.d('Updating OB for ' + mname);
+            poloniex.returnOrderBook(mname, 1000, function (err, data) {
+                if (err) {
+                    l.e('failed to update ob for ' + mname + ' : ' + err);
+                } else {
+                    markets[mname]['ob_asks'] = data['asks'];   // copy the whole thing
+                    markets[mname]['ob_bids'] = data['bids'];   // copy the whole thing
+//                    l.d("OB updated for " + mname);
+                }
+            });
+            await utils.sleep(200);
+        }
+        l.d("Updated all orderbooks.");
     }
 }
 
@@ -446,7 +463,7 @@ function processOrders () {
             l.e(`Error reading file ${fn}: ${err}`);
             return;
         }
-        l.i(c['ORDERS_FN'] + " dump: " + data);
+        l.d(c['ORDERS_FN'] + " dump: " + data);
 		json = JSON.parse(data);
 		timeout = json['timeout'];
 		actions = json['actions'];
@@ -557,9 +574,11 @@ poloniex.on('open', (err, body) => {
 /*	fs.watch('/home/yair/w/volatile/', {}, (eventType, filename) => {
 		console.log(`Filename: ${filename}, eventType: ${eventType}`);
 	});*/
+    // TODO: What if an ORDERS_FN exists on open? Should we go ahead and process it? It's prolly there because of a fault-induced restart...
 	inotify.addWatch({
 		path:		c['VOLATILE_DIR'],
-		watch_for:	Inotify.IN_CLOSE,
+//		watch_for:	Inotify.IN_CLOSE,
+		watch_for:	Inotify.IN_CLOSE_WRITE,
 		callback:	function (event) {
 			if (event.name == c['ORDERS_FN']) {
 			    l.i(`${event.name} closed.`);
@@ -572,7 +591,8 @@ poloniex.on('open', (err, body) => {
 });
 
 poloniex.on('close', (reason, details) => {
-    l.e(`Poloniex WebSocket connection disconnected`);
+    l.e(`Poloniex WebSocket connection disconnected. Exitting.`);
+    process.exit(1);
 });
 
 poloniex.on('error', (error) => {
