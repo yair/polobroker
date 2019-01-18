@@ -362,7 +362,14 @@ function remaining_amount (act) {
     if (act['type'] == 'Buy') { // TODO: Should also restrict buys on BTC shortage - prolly by averaging on all open buys
         let rem = parseFloat(act['prev_balance']) + parseFloat(act['total_amount']) - parseFloat(act['current_balance']);
 //        let available_to_buy = parseFloat(act['btc_balance']) * parseFloat(act['price']);
-        let available_to_buy = parseFloat(act['btc_balance']) / parseFloat(act['price']);
+        let available_to_buy = parseFloat(act['btc_balance']) / parseFloat(act['price']);     // BOOG - should add btc locked in currently open order. Fixed?
+        l.i("Can buy " + available_to_buy + " with free BTC.");
+        for (var active_order_id in act['active_orders']) {
+            active_order_rate = Object.keys(act['active_orders'])[order_id];
+            active_order_amount = act['active_orders']['active_order_rate']['amount'];
+            l.i("Already buying " + active_order_amount + " coins, so adding that as well");
+            available_to_buy += active_order_amount;
+        }
         l.i("available to buy = btc / price = " + act['btc_balance'] + " / " + act['price'] + " = " + parseFloat(act['btc_balance']) / parseFloat(act['price']));
         if (act['mname'] == 'USDT_BTC') {
             available_to_buy = parseFloat(act['current_balance']) / parseFloat(act['price']);
