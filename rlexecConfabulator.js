@@ -66,7 +66,7 @@ function init_volumes (rlc) {
 		json = JSON.parse(data);
         for (market in Object.keys(json)) {
             mname = Object.keys(json)[market];
-            volumes[mname] = json[mname] / rlc.volume_divizor;  // bsats per period (180s)
+            volumes[mname] = json[mname] / rlc.volume_divizor;  // bsats per period (360s)
         }
     });
 }
