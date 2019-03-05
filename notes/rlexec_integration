@@ -1,0 +1,4 @@
+rlexec works from the time fraction (which we have) and the volume fraction (which we don't have. We need to extract portfolio worth from PGP, but can use a const for now) to generate actions, which depends on the average market volume, which we don't have either.
+Also, regarding volume fraction. A fraction of what is it? The amount to buy? The portfolio value? The fraction of 100mBTC we used to calculate it? I think it's the latter. Should we re-run the thing with a 10mBTC target? Or even less?
+It does this using the rlexec policies, which are currently stored in aoerl_rlexec_o_20180801.prod.
+

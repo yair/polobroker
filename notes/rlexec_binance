@@ -1,0 +1,23 @@
+We want to have a binance facing rlexec trader.
+We have a few dilemmas before we start -
+- Completely shared code, or share only the confabulator. This is problematic because tracking websocket updates is very exchange-specific.
+- Use Binance's API or go through an abstraction library, e.g. ccxt.
+
+Ideally, we'd want to rewrite it in ccxt, and then support both via it. How hard would that be?
+They actually do have websocket support for ob and orders --
+- https://github.com/ccxt/ccxt/issues/56
+- https://github.com/lfern/ccxt/blob/feature/websockets-multiple/WEBSOCKETS.md
+is the ob feature the only ws we need? I think so. :/ Ticker is the global one for price changes (which we don't use). We use the market specific order updates, which is what's termed 'ob' by ccxt. I think. It also contains all the trades (and hence price/ticker date). And we use trade info (this is when we go look if our orders have been hit), but ccxt only supports that for binance, not for poloni. We could try to use it only for binance for now. :/
+Testing it binance code seems to be pretty broken too. At least the example is (binance order example both crashes and retrieves order book updates and not trades).
+So, forget about it, or maintain a branch of ccxt ouselves? Forgetaboutit.
+
+But!
+Yeah...
+
+Next - do we write it from scratch or do we just hack modifications to a file copy?
+This is so icky.
+Thing is, even if we get ccxt up to speed, it won't be stable, because this is still in early development. So bleh, but yeah.
+
+Next Q - do we want to rewrite the broker so that it supports both exchanges? I think we should. So this should be done in a separate folder.
+Let's do it as a state machine. Yeah. And maybe as a new project as well?
+So name, we need a name. pmbroker? Sure, why not.

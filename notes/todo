@@ -1,3 +1,5 @@
+Boog: We seem not to recognize when our order has been hit. Is that an exchange boog?
+
 Need to debug and optimize.
 BrokerBot:
 - Work directly off omega, instead of relying on pgp to generate the correct orders (which it doesn't).

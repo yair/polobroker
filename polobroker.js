@@ -36,7 +36,7 @@ var poloniex = new Poloniex(secrets['key'], secrets['secret'], { nonce: () => Da
 var full_market_list = {};
 
 // test polo login
-poloniex.returnBalances(function (err, balances) {
+poloniex.returnBalances(function (err, balances) { // TODO: Replace this by killing all standing orders
       if (err) {
           l.e("Failed to login to polo: " + err);
           process.exit(1);

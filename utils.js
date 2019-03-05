@@ -18,8 +18,9 @@ module.exports = {
     },
 
     midprice: function (market) {
+//        console.log ('midprice: market=' + JSON.stringify (market));
         getSortedOB = module.exports['getSortedOB'];
-        console.log('midprice: mname=' + market['mname'] + ' bottom=' + getSortedOB(market['ob_bids']).reverse()[0][0] + ' top=' + getSortedOB(market['ob_asks'])[0][0]);
+//        console.log('midprice: mname=' + market['mname'] + ' bottom=' + getSortedOB(market['ob_bids']).reverse()[0][0] + ' top=' + getSortedOB(market['ob_asks'])[0][0]);
         ret = .5 * (parseFloat(getSortedOB(market['ob_bids']).reverse()[0][0]) + parseFloat(getSortedOB(market['ob_asks'])[0][0]));
         console.log('midprice: returning ' + ret);
         return ret;

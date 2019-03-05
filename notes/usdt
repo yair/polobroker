@@ -1,0 +1,18 @@
+order -- {"price": 0.00014895098865963519, "previous_balance": 0.00212046, "mname": "USDT_BTC", "amount": 0.00034194147186394474, "type": "Sell"}
+Price is inverted.
+balance is corrent (in BTC)
+amount is also in BTC
+And Sell is also correct. We want to sell BTC for USDT, so no need to invert before sending to poloni.
+
+Initial act -- {"mname":"USDT_BTC","start":1537760443733,"price":6718.300149188069,"timeout":180,"prev_balance":0.00957009,"current_balance":0.00957009,"total_amount":0.00035567727127544687,"type":"Buy","amount_changed":0,"trades":[],"triggerRunning":true,"done":false,"exch_trades":{},"fetching_balances":false,"active_orders":{},"pending_add":{},"pending_remove":{},"pending_timestamp":0,"order_archive":[],"market_order":false,"coin_name":"USDT","btc_balance":null}
+Price was inverted (good, not that it matters), but type was changed to Buy, which is wrong.
+I mean, it is buy from our standpoint (BTC is base, USDT is an alt), but poloni treats USDT as base. Also, all our OBs etc. are USDT based, so.
+OTOH, this costs BTC, so should run at the second (buying) stage, because we might not have the BTC until we sold some alts.
+
+So I won't change polobroker::invert_action, but switch types after action has been activated.
+
+We can't change the act itself, because it won't trigger in the wrong place.
+
+So two options -- create exceptions in confabulator, collision detection etc., or don't flip the action and create the exception in trigger_all...
+
+Are we getting impossible amounts from PGP? Or are we mixing buy and sell again?

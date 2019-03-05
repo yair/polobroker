@@ -348,7 +348,7 @@ function action_price_16a(market, act, action, remaining_amount) {    // Should 
             return their0 + PRICE_RESOLUTION;
         }
 	} else if (action >= rlexec_config['action_lu']['ALU_BR_0125'] && action <= rlexec_config['action_lu']['ALU_BR_075']) {
-		if (action == ALU_BR_0125) {
+		if (action == rlexec_config['action_lu']['ALU_BR_0125']) {
 			no_deeper_than = remaining_amount / 8;
 			console.log ('ALU_BR_0125: no_deeper_than = vol / 8 = ' + no_deeper_than);
 		} else {
